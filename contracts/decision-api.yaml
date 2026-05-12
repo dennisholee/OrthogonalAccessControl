@@ -1,0 +1,217 @@
+openapi: 3.1.0
+info:
+  title: Orthogonal Access Control Decision API
+  version: 0.1.0
+  description: Contract for authorization decisions with explicit deny precedence and explainability.
+servers:
+  - url: https://authz.internal.example
+paths:
+  /v1/decisions/check-permission:
+    post:
+      summary: Check a single authorization decision
+      operationId: checkPermission
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CheckPermissionRequest'
+      responses:
+        '200':
+          description: Decision result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckPermissionResponse'
+        '400':
+          description: Input validation failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Dependency unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/decisions/lookup-resources:
+    post:
+      summary: Lookup resources authorized for subject and action
+      operationId: lookupResources
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LookupResourcesRequest'
+      responses:
+        '200':
+          description: Authorized resources
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LookupResourcesResponse'
+        '400':
+          description: Input validation failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+components:
+  schemas:
+    SubjectRef:
+      type: object
+      required: [type, id]
+      properties:
+        type:
+          type: string
+          enum: [human, workload, batch, delegated]
+        id:
+          type: string
+    ResourceRef:
+      type: object
+      required: [type, id]
+      properties:
+        type:
+          type: string
+        id:
+          type: string
+    BoundaryContext:
+      type: object
+      required: [tenant, geography, market, lineOfBusiness, channel]
+      properties:
+        tenant:
+          type: string
+        geography:
+          type: string
+        market:
+          type: string
+        lineOfBusiness:
+          type: string
+        channel:
+          type: string
+    CheckPermissionRequest:
+      type: object
+      required: [subject, action, resource, boundaryContext]
+      properties:
+        subject:
+          $ref: '#/components/schemas/SubjectRef'
+        action:
+          type: string
+        resource:
+          $ref: '#/components/schemas/ResourceRef'
+        boundaryContext:
+          $ref: '#/components/schemas/BoundaryContext'
+        runtimeContext:
+          type: object
+          additionalProperties: true
+        consistencyToken:
+          type: string
+          description: Optional causal consistency token for critical read-after-write paths.
+        strictConsistency:
+          type: boolean
+          description: Enables strict consistency-token validation for critical operations.
+        endpointClassification:
+          type: string
+          enum: [FAIL_CLOSED, FAIL_OPEN]
+          description: Endpoint continuity class used during dependency outage handling.
+        endpointKey:
+          type: string
+          description: Registry key used to validate fail-open endpoint eligibility.
+        requestId:
+          type: string
+    CheckPermissionResponse:
+      type: object
+      required: [decision, decisionCode, evaluatedAt]
+      properties:
+        decision:
+          type: string
+          enum: [ALLOW, DENY, CONDITIONAL_DENY]
+        decisionCode:
+          type: string
+        matchedPolicies:
+          type: array
+          items:
+            type: string
+        obligations:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        explanationRefs:
+          type: array
+          items:
+            type: string
+        evaluatedAt:
+          type: string
+          format: date-time
+    LookupResourcesRequest:
+      type: object
+      required: [subject, action, resourceType, boundaryContext]
+      properties:
+        subject:
+          $ref: '#/components/schemas/SubjectRef'
+        action:
+          type: string
+        resourceType:
+          type: string
+        boundaryContext:
+          $ref: '#/components/schemas/BoundaryContext'
+        consistencyToken:
+          type: string
+        strictConsistency:
+          type: boolean
+          description: Enables strict consistency-token validation on lookup operations.
+        requiredConsistencyToken:
+          type: string
+          description: Reference token expected by the caller for strict consistency verification.
+        simulatedRegionalLagMs:
+          type: integer
+          minimum: 0
+          description: Optional regional lag simulation input for resilience validation.
+        replicaVersion:
+          type: integer
+          minimum: 0
+          description: Optional replica version observed by caller.
+        minimumReplicaVersion:
+          type: integer
+          minimum: 0
+          description: Optional minimum acceptable replica version for strict consistency.
+        pageSize:
+          type: integer
+          minimum: 1
+          maximum: 1000
+          default: 100
+        pageToken:
+          type: string
+    LookupResourcesResponse:
+      type: object
+      required: [resourceIds]
+      properties:
+        resourceIds:
+          type: array
+          items:
+            type: string
+        nextPageToken:
+          type: string
+    ErrorItem:
+      type: object
+      required: [code, message, retryable]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        retryable:
+          type: boolean
+    ErrorResponse:
+      type: object
+      required: [decisionCode, errors]
+      properties:
+        decisionCode:
+          type: string
+        errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/ErrorItem'

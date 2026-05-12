@@ -1,0 +1,15 @@
+{
+  "name": "policy-doc-sync",
+  "description": "Warn when PRD.md and ARCHITECTURE.md are modified without corresponding counterpart updates.",
+  "hooks": [
+    {
+      "type": "command",
+      "event": "PostToolUse",
+      "tools": [
+        "create_file",
+        "apply_patch"
+      ],
+      "command": "sh -lc 'changed=$(git diff --name-only -- PRD.md ARCHITECTURE.md); has_prd=$(printf \"%s\" \"$changed\" | grep -c \"^PRD.md$\"); has_arch=$(printf \"%s\" \"$changed\" | grep -c \"^ARCHITECTURE.md$\"); if [ \"$has_prd\" -gt 0 ] && [ \"$has_arch\" -eq 0 ]; then echo \"POLICY-DOC-SYNC: PRD.md changed without ARCHITECTURE.md update. Review architecture alignment.\"; exit 2; fi; if [ \"$has_arch\" -gt 0 ] && [ \"$has_prd\" -eq 0 ]; then echo \"POLICY-DOC-SYNC: ARCHITECTURE.md changed without PRD.md update. Review requirements alignment.\"; exit 2; fi; exit 0'"
+    }
+  ]
+}

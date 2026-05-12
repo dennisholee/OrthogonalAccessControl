@@ -1,0 +1,287 @@
+openapi: 3.1.0
+info:
+  title: Orthogonal Access Control Admin API
+  version: 0.1.0
+  description: Contract for policy lifecycle, approvals, and relationship administration.
+servers:
+  - url: https://authz-admin.internal.example
+paths:
+  /v1/admin/policies:
+    post:
+      summary: Create policy draft
+      operationId: createPolicyDraft
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePolicyRequest'
+      responses:
+        '201':
+          description: Draft created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PolicyResponse'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/admin/policies/{policyId}/promote:
+    post:
+      summary: Promote policy through lifecycle states
+      operationId: promotePolicy
+      parameters:
+        - name: policyId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PromotePolicyRequest'
+      responses:
+        '200':
+          description: Promotion result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PolicyResponse'
+        '409':
+          description: Approval or lifecycle gate failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/admin/audit-events:
+    get:
+      summary: List policy and decision audit evidence events
+      operationId: listAuditEvents
+      parameters:
+        - name: entityId
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Optional entity identifier to filter audit events.
+      responses:
+        '200':
+          description: Audit event records
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AuditEventRecord'
+  /v1/admin/recovery/continuity:
+    get:
+      summary: Verify DR continuity across active policies and audit evidence
+      operationId: verifyDisasterRecoveryContinuity
+      parameters:
+        - name: rehearsal
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+          description: Executes a failover rehearsal write/read check against the audit store.
+      responses:
+        '200':
+          description: DR continuity verification result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DisasterRecoveryStatusResponse'
+components:
+  schemas:
+    PolicyRiskLevel:
+      type: string
+      enum: [LOW, MEDIUM, HIGH, CRITICAL]
+
+    CreatePolicyRequest:
+      type: object
+      required: [name, effect, owner, author, riskLevel]
+      properties:
+        name:
+          type: string
+        effect:
+          type: string
+          enum: [ALLOW, DENY]
+        owner:
+          type: string
+        author:
+          type: string
+        riskLevel:
+          $ref: '#/components/schemas/PolicyRiskLevel'
+        definition:
+          type: string
+        idempotencyKey:
+          type: string
+          description: Required for retried mutation requests.
+
+    PromotePolicyRequest:
+      type: object
+      required: [targetState, approvers]
+      properties:
+        targetState:
+          type: string
+          enum: [VALIDATED, APPROVED, STAGED, ACTIVE, DEPRECATED, RETIRED]
+        approvers:
+          type: array
+          items:
+            type: string
+        approverRoles:
+          type: array
+          items:
+            type: string
+          description: Optional approver role list aligned by index to approvers.
+        simulationCoverage:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Required for lifecycle gates where simulation thresholds apply.
+        changeRationale:
+          type: string
+        rollbackReference:
+          type: string
+          description: Required for ACTIVE promotions.
+        consistencyToken:
+          type: string
+          description: Optional causal token for strict promotion sequencing.
+        idempotencyKey:
+          type: string
+
+    PolicyResponse:
+      type: object
+      required: [policyId, version, state, riskLevel, decisionCode]
+      properties:
+        policyId:
+          type: string
+        version:
+          type: integer
+        state:
+          type: string
+          enum: [DRAFT, VALIDATED, APPROVED, STAGED, ACTIVE, DEPRECATED, RETIRED]
+        riskLevel:
+          $ref: '#/components/schemas/PolicyRiskLevel'
+        decisionCode:
+          type: string
+          enum:
+            - POLICY_DRAFT_CREATED
+            - POLICY_PROMOTION_COMPLETED
+        evidenceRef:
+          type: string
+
+    AuditEventRecord:
+      type: object
+      required: [eventId, eventType, entityType, entityId, actor, decisionCode, severity, occurredAt]
+      properties:
+        eventId:
+          type: string
+        eventType:
+          type: string
+          enum: [POLICY_DRAFT_CREATED, POLICY_PROMOTED, DECISION_EVALUATED, DR_FAILOVER_REHEARSAL]
+        entityType:
+          type: string
+          enum: [POLICY, DECISION, SYSTEM]
+        entityId:
+          type: string
+        actor:
+          type: string
+        decisionCode:
+          type: string
+        evidenceRef:
+          type: string
+        severity:
+          type: string
+          enum: [INFO, WARN, ERROR]
+        occurredAt:
+          type: string
+          format: date-time
+
+    DisasterRecoveryStatusResponse:
+      type: object
+      required:
+        - policyRegistryAvailable
+        - auditStoreAvailable
+        - policyAuditContinuityIntact
+        - failoverRehearsalExecuted
+        - failoverRehearsalPassed
+        - activePolicyCount
+        - activePoliciesWithAuditCoverage
+        - decisionCode
+        - verifiedAt
+      properties:
+        policyRegistryAvailable:
+          type: boolean
+        auditStoreAvailable:
+          type: boolean
+        policyAuditContinuityIntact:
+          type: boolean
+        failoverRehearsalExecuted:
+          type: boolean
+        failoverRehearsalPassed:
+          type: boolean
+        activePolicyCount:
+          type: integer
+          minimum: 0
+        activePoliciesWithAuditCoverage:
+          type: integer
+          minimum: 0
+        decisionCode:
+          type: string
+          enum: [DR_CONTINUITY_VERIFIED, DR_CONTINUITY_GAP_DETECTED]
+        verifiedAt:
+          type: string
+          format: date-time
+
+    ErrorItem:
+      type: object
+      required: [code, message, retryable]
+      properties:
+        code:
+          type: string
+          enum:
+            - VALIDATION_ERROR
+            - POLICY_NOT_FOUND
+            - POLICY_INVALID_STATE_TRANSITION
+            - POLICY_SEPARATION_OF_DUTIES_VIOLATION
+            - POLICY_SIMULATION_COVERAGE_INSUFFICIENT
+            - POLICY_APPROVER_ROLE_MISMATCH
+            - POLICY_APPROVAL_QUORUM_NOT_MET
+            - POLICY_OWNER_ACK_REQUIRED
+            - POLICY_REQUIRED_APPROVER_ROLE_MISSING
+            - POLICY_CHANGE_RATIONALE_REQUIRED
+            - POLICY_ROLLBACK_REFERENCE_REQUIRED
+        message:
+          type: string
+        retryable:
+          type: boolean
+
+    ErrorResponse:
+      type: object
+      required: [decisionCode, errors]
+      properties:
+        decisionCode:
+          type: string
+          enum:
+            - VALIDATION_ERROR
+            - POLICY_NOT_FOUND
+            - POLICY_INVALID_STATE_TRANSITION
+            - POLICY_SEPARATION_OF_DUTIES_VIOLATION
+            - POLICY_SIMULATION_COVERAGE_INSUFFICIENT
+            - POLICY_APPROVER_ROLE_MISMATCH
+            - POLICY_APPROVAL_QUORUM_NOT_MET
+            - POLICY_OWNER_ACK_REQUIRED
+            - POLICY_REQUIRED_APPROVER_ROLE_MISSING
+            - POLICY_CHANGE_RATIONALE_REQUIRED
+            - POLICY_ROLLBACK_REFERENCE_REQUIRED
+        errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/ErrorItem'

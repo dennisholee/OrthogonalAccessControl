@@ -1,0 +1,15 @@
+{
+  "name": "policy-glossary-check",
+  "description": "Warn when forbidden or outdated glossary terms appear in core requirements/architecture/customization docs.",
+  "hooks": [
+    {
+      "type": "command",
+      "event": "PostToolUse",
+      "tools": [
+        "create_file",
+        "apply_patch"
+      ],
+      "command": "sh -lc 'changed=$(git diff --name-only -- PRD.md ARCHITECTURE.md AGENTS.md .github/instructions .github/prompts .github/agents); if [ -z \"$changed\" ]; then exit 0; fi; violations=$(rg -n \"SpiceDB|ZedToken|zedToken|line-of-business\" PRD.md ARCHITECTURE.md AGENTS.md .github/instructions .github/prompts .github/agents 2>/dev/null || true); if [ -n \"$violations\" ]; then echo \"POLICY-GLOSSARY-CHECK: Found forbidden or outdated terms. Use canonical project terminology.\"; echo \"$violations\"; exit 2; fi; exit 0'"
+    }
+  ]
+}
