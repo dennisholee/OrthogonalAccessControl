@@ -6,6 +6,8 @@ import com.oac.decision.application.port.out.AuditEvidencePort;
 import com.oac.decision.application.port.out.FailOpenEndpointPolicyPort;
 import com.oac.decision.application.port.out.ObservabilityPort;
 import com.oac.decision.application.port.out.PolicyRegistryPort;
+import com.oac.decision.application.port.out.RelationshipGraphPort;
+import com.oac.decision.application.service.decision.rules.ReBacRelationshipRule;
 import com.oac.decision.application.service.decision.DecisionContext;
 import com.oac.decision.application.service.decision.DecisionOutcome;
 import com.oac.decision.application.service.decision.DecisionRule;
@@ -30,34 +32,39 @@ import java.util.UUID;
 
 public class DecisionApplicationService implements DecisionQueryUseCase {
 
-    private static final List<DecisionRule> RULES = List.of(
-            new ExplicitDenyRule(),
-            new MissingBoundaryContextRule(),
-            new BoundaryViolationRule(),
-            new DependencyOutageRule(),
-            new ConsistencyTokenRule(),
-            new AllowRule(),
-            new DefaultDenyRule()
-    );
-
     private final PolicyRegistryPort policyRegistryPort;
     private final AttributeResolverPort attributeResolverPort;
     private final AuditEvidencePort auditEvidencePort;
     private final ObservabilityPort observabilityPort;
     private final FailOpenEndpointPolicyPort failOpenEndpointPolicyPort;
+    private final RelationshipGraphPort relationshipGraphPort;
+
+    private final List<DecisionRule> RULES;
 
     public DecisionApplicationService(
             PolicyRegistryPort policyRegistryPort,
             AttributeResolverPort attributeResolverPort,
             AuditEvidencePort auditEvidencePort,
             ObservabilityPort observabilityPort,
-            FailOpenEndpointPolicyPort failOpenEndpointPolicyPort
+            FailOpenEndpointPolicyPort failOpenEndpointPolicyPort,
+            RelationshipGraphPort relationshipGraphPort
     ) {
         this.policyRegistryPort = policyRegistryPort;
         this.attributeResolverPort = attributeResolverPort;
         this.auditEvidencePort = auditEvidencePort;
         this.observabilityPort = observabilityPort;
         this.failOpenEndpointPolicyPort = failOpenEndpointPolicyPort;
+        this.relationshipGraphPort = relationshipGraphPort;
+        this.RULES = List.of(
+                new ExplicitDenyRule(),
+                new MissingBoundaryContextRule(),
+                new BoundaryViolationRule(),
+                new DependencyOutageRule(),
+                new ConsistencyTokenRule(),
+                new ReBacRelationshipRule(relationshipGraphPort),
+                new AllowRule(),
+                new DefaultDenyRule()
+        );
     }
 
     @Override

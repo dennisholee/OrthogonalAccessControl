@@ -1,0 +1,7 @@
+spring:
+  autoconfigure:
+    exclude: []
+  data:
+    mongodb:
+      uri: mongodb://localhost:27017/oac_authorization
+      auto-index-creation: true

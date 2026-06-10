@@ -175,7 +175,36 @@ public class PolicyDecisionSteps {
                     public void recordFailoverRehearsal(boolean passed) {
                     }
                 },
-                endpointKey -> "account:read".equals(endpointKey) || "statement:read".equals(endpointKey)
+                endpointKey -> "account:read".equals(endpointKey) || "statement:read".equals(endpointKey),
+                new com.oac.decision.application.port.out.RelationshipGraphPort() {
+                    @Override
+                    public List<com.oac.decision.model.RelationshipEdge> findRelationships(CheckPermissionRequest request) {
+                        return List.of();
+                    }
+                    @Override
+                    public List<String> findRelatedResourceIds(String subjectId, String resourceType, String relationshipType, int maxDepth) {
+                        return List.of();
+                    }
+                    @Override
+                    public java.util.Set<String> traverseResources(String subjectId, String resourceType, int maxDepth) {
+                        return java.util.Set.of();
+                    }
+                    @Override
+                    public String createRelationship(com.oac.decision.model.RelationshipEdge edge) {
+                        return java.util.UUID.randomUUID().toString();
+                    }
+                    @Override
+                    public void revokeRelationship(String relationshipId) {
+                    }
+                    @Override
+                    public boolean hasRelationship(String subjectId, String resourceId, String relationshipType, int maxDepth) {
+                        return false;
+                    }
+                    @Override
+                    public int getMaxTraversalDepth() {
+                        return 3;
+                    }
+                }
         );
         CheckPermissionRequest request = new CheckPermissionRequest(
                 subject,

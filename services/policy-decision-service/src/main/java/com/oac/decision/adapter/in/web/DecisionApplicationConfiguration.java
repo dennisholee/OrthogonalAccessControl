@@ -7,6 +7,7 @@ import com.oac.decision.application.port.out.AuditEvidencePort;
 import com.oac.decision.application.port.out.FailOpenEndpointPolicyPort;
 import com.oac.decision.application.port.out.ObservabilityPort;
 import com.oac.decision.application.port.out.PolicyRegistryPort;
+import com.oac.decision.application.port.out.RelationshipGraphPort;
 import com.oac.decision.application.service.DecisionApplicationService;
 import com.oac.decision.application.service.PolicyAdministrationService;
 import org.springframework.context.annotation.Bean;
@@ -21,14 +22,16 @@ public class DecisionApplicationConfiguration {
             AttributeResolverPort attributeResolverPort,
             AuditEvidencePort auditEvidencePort,
             ObservabilityPort observabilityPort,
-            FailOpenEndpointPolicyPort failOpenEndpointPolicyPort
+            FailOpenEndpointPolicyPort failOpenEndpointPolicyPort,
+            RelationshipGraphPort relationshipGraphPort
     ) {
         return new DecisionApplicationService(
                 policyRegistryPort,
                 attributeResolverPort,
                 auditEvidencePort,
                 observabilityPort,
-                failOpenEndpointPolicyPort
+                failOpenEndpointPolicyPort,
+                relationshipGraphPort
         );
     }
 

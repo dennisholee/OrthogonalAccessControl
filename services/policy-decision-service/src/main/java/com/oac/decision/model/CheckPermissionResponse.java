@@ -10,6 +10,17 @@ public record CheckPermissionResponse(
         List<String> matchedPolicies,
         List<Map<String, Object>> obligations,
         List<String> explanationRefs,
-        OffsetDateTime evaluatedAt
+        OffsetDateTime evaluatedAt,
+        AttributeAccessMap attributeAccessMap
 ) {
+    public CheckPermissionResponse(
+            String decision,
+            String decisionCode,
+            List<String> matchedPolicies,
+            List<Map<String, Object>> obligations,
+            List<String> explanationRefs,
+            OffsetDateTime evaluatedAt
+    ) {
+        this(decision, decisionCode, matchedPolicies, obligations, explanationRefs, evaluatedAt, AttributeAccessMap.empty());
+    }
 }

@@ -3,6 +3,7 @@ package com.oac.decision.adapter.out.policy;
 import com.oac.decision.application.port.out.PolicyRegistryPort;
 import com.oac.decision.model.CheckPermissionRequest;
 import com.oac.decision.model.LookupResourcesRequest;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -10,6 +11,7 @@ import java.util.List;
 import java.util.Map;
 
 @Component
+@Profile("!mongodb")
 public class InMemoryPolicyRegistryAdapter implements PolicyRegistryPort {
 
     private static final List<ResourceGrant> RESOURCE_GRANTS = List.of(
