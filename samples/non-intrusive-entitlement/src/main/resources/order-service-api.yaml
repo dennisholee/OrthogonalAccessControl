@@ -1,0 +1,143 @@
+openapi: 3.1.0
+info:
+  title: Entitlement-Managed Order API
+  version: 1.0.0
+  description: Sample API demonstrating non-intrusive entitlement enforcement via vendor extensions
+
+servers:
+  - url: http://localhost:8082
+    description: Local development
+
+paths:
+  /api/orders/{orderId}:
+    get:
+      tags: [Orders]
+      operationId: getOrder
+      summary: "Get order by ID (entitlement: READ)"
+      x-oac-entitlement:
+        action: READ
+        resourceType: order
+        resourceIdPath: orderId
+        enforceFieldMask: true
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: "Order details (PII may be masked by entitlement layer)"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderResponse'
+        '403':
+          description: "Access denied by entitlement layer"
+          $ref: '#/components/schemas/ErrorResponse'
+
+  /api/orders:
+    get:
+      tags: [Orders]
+      operationId: listOrders
+      summary: "List all orders (entitlement: READ per resource)"
+      x-oac-entitlement:
+        action: READ
+        resourceType: order
+        enforceFieldMask: true
+      responses:
+        '200':
+          description: "List of orders (filtered + masked by entitlement layer)"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/OrderResponse'
+
+  /api/orders/{orderId}/approve:
+    post:
+      tags: [Orders]
+      operationId: approveOrder
+      summary: "Approve an order (entitlement: APPROVE via ReBAC)"
+      x-oac-entitlement:
+        action: APPROVE
+        resourceType: order
+        resourceIdPath: orderId
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Order approved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderResponse'
+        '403':
+          description: Access denied
+          $ref: '#/components/schemas/ErrorResponse'
+
+  /api/orders/aggregate:
+    get:
+      tags: [Orders]
+      operationId: getAggregate
+      summary: "Get aggregated order data (entitlement: READ_AGGREGATE for workloads)"
+      x-oac-entitlement:
+        action: READ_AGGREGATE
+        resourceType: order
+        subjectType: workload
+        subjectIdHeader: X-Service-Id
+      responses:
+        '200':
+          description: Aggregated order data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AggregateResponse'
+
+  /api/seed:
+    post:
+      tags: [Admin]
+      operationId: seedSampleData
+      summary: "Seed sample data (bootstrap operation)"
+      responses:
+        '200':
+          description: Sample data seeded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+
+components:
+  schemas:
+    OrderResponse:
+      type: object
+      properties:
+        id: { type: string }
+        product: { type: string }
+        quantity: { type: integer }
+        total: { type: number, format: double }
+        status: { type: string }
+        customerName: { type: string }
+        customerEmail:
+          type: string
+          description: "May be masked by entitlement layer"
+        customerSsn:
+          type: string
+          description: "May be redacted by entitlement layer"
+
+    AggregateResponse:
+      type: object
+      properties:
+        totalOrders: { type: integer }
+        totalRevenue: { type: number }
+
+    ErrorResponse:
+      type: object
+      properties:
+        error: { type: string }
+        code: { type: string }

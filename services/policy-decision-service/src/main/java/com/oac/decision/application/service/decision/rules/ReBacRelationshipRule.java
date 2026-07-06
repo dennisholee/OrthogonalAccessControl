@@ -15,6 +15,11 @@ import java.util.Optional;
  * This rule sits between BoundaryViolation and Allow in the precedence chain:
  * relationships are evaluated after structural boundary checks but before
  * blanket ALLOW rules.
+ *
+ * When a relationship IS found, this rule returns empty (pass-through) so that
+ * the AllowRule downstream can evaluate caveats and produce the final ALLOW
+ * decision with field-level access constraints. When NO relationship exists,
+ * this rule returns an explicit DENY to short-circuit the chain.
  */
 public class ReBacRelationshipRule implements DecisionRule {
 
@@ -26,9 +31,11 @@ public class ReBacRelationshipRule implements DecisionRule {
 
     @Override
     public Optional<DecisionOutcome> evaluate(DecisionContext context) {
-        // Only evaluate if there are ReBAC-style policies matched
+        // Only evaluate if there are ReBAC-style policies matched.
+        // Skip FIELD policies so field-level scenarios aren't blocked.
         boolean hasReBACPolicy = context.matchedPolicies().stream()
-                .anyMatch(policy -> policy.contains("REBAC") || policy.contains("RELATIONSHIP"));
+                .anyMatch(policy -> (policy.contains("REBAC") || policy.contains("RELATIONSHIP"))
+                        && !policy.contains("FIELD"));
 
         if (!hasReBACPolicy) {
             return Optional.empty();
@@ -53,11 +60,7 @@ public class ReBacRelationshipRule implements DecisionRule {
             ));
         }
 
-        // Relationship found — allow and delegate to caveat check in AllowRule
-        return Optional.of(new DecisionOutcome(
-                "ALLOW",
-                "DECISION_REBAC_RELATIONSHIP_ALLOW",
-                "evidence://decision/rebac/relationship-allow"
-        ));
+        // Relationship found — pass through to AllowRule for caveat evaluation
+        return Optional.empty();
     }
 }

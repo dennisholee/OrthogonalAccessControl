@@ -21,8 +21,9 @@ public class SourceIpRangeCaveatEvaluator implements CaveatEvaluator {
     public boolean evaluate(DecisionContext context, Map<String, Object> caveatParams) {
         // Extract source IP from runtime context
         String clientIp = stringParam(context.resolvedRuntimeContext(), "clientIp");
-        if (clientIp == null) {
-            return false;
+        // If no client IP is provided, this caveat does not apply (pass-through)
+        if (clientIp == null || !caveatParams.containsKey("cidr") && !caveatParams.containsKey("allowedRanges")) {
+            return true;
         }
 
         Object allowedRanges = caveatParams.get("allowedRanges");

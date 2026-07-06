@@ -10,7 +10,7 @@ public class ExplicitDenyRule implements DecisionRule {
 
     @Override
     public Optional<DecisionOutcome> evaluate(DecisionContext context) {
-        boolean hasExplicitDeny = context.matchedPolicies().stream().anyMatch(policy -> policy.contains(".DENY."));
+        boolean hasExplicitDeny = context.matchedPolicies().stream().anyMatch(policy -> policy.contains("DENY"));
         if (!hasExplicitDeny) {
             return Optional.empty();
         }

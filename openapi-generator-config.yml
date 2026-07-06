@@ -1,0 +1,53 @@
+# OpenAPI Generator Configuration for OAC Decision + Admin APIs
+# Used by openapi-generator-maven-plugin to generate Spring Boot 3 interfaces + models
+#
+# Usage:
+#   mvn openapi-generator:generate -f services/policy-decision-service/pom.xml
+#   mvn openapi-generator:generate -f libraries/spring-policy-enforcement-starter/pom.xml
+
+generatorName: spring
+library: spring-boot
+apiPackage: com.oac.decision.api.generated
+modelPackage: com.oac.decision.api.generated.model
+invokerPackage: com.oac.decision.api.generated.invoker
+
+additionalProperties:
+  useSpringBoot3: true
+  useTags: true
+  interfaceOnly: true
+  skipDefaultInterface: false
+  useJakartaEe: true
+  dateLibrary: java8
+  serializableModel: true
+  useOptional: false
+  openApiNullable: false
+  documentationProvider: none
+  annotationLibrary: none
+  useBeanValidation: true
+  performBeanValidation: true
+  hideGenerationTimestamp: true
+  generateBuilders: true
+  generateConstructorWithAllArgs: true
+  additionalModelTypeAnnotations: "@lombok.Builder @lombok.NoArgsConstructor @lombok.AllArgsConstructor"
+  additionalOneOfTypeAnnotations: "@lombok.Builder"
+  additionalEnumTypeAnnotations: "@lombok.Getter"
+  additionalPropertyAnnotations: "@lombok.Getter @lombok.Setter"
+
+typeMappings:
+  integer: Integer
+  float: Double
+  long: Long
+  number: java.math.BigDecimal
+  date-time: java.time.OffsetDateTime
+  date: java.time.LocalDate
+  file: org.springframework.core.io.Resource
+  object: java.util.LinkedHashMap<String, Object>
+
+importMappings:
+  OffsetDateTime: java.time.OffsetDateTime
+  LocalDate: java.time.LocalDate
+  LinkedHashMap: java.util.LinkedHashMap
+
+globalProperties:
+  skipFormModel: false
+  generateSupportingFiles: false

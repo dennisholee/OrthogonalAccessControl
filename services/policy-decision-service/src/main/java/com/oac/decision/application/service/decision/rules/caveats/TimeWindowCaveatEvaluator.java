@@ -17,10 +17,22 @@ public class TimeWindowCaveatEvaluator implements CaveatEvaluator {
 
     @Override
     public boolean evaluate(DecisionContext context, Map<String, Object> caveatParams) {
-        Instant now = Instant.now();
+        // Use simulated time from runtime context if available, otherwise real current time
+        String nowStr = null;
+        Map<String, Object> rt = context.request().runtimeContext();
+        if (rt != null && rt.containsKey("requestTime")) {
+            Object t = rt.get("requestTime");
+            if (t != null) nowStr = t.toString();
+        }
+        Instant now = nowStr != null ? Instant.from(DateTimeFormatter.ISO_DATE_TIME.parse(nowStr)) : Instant.now();
 
         String startStr = stringParam(caveatParams, "start");
         String endStr = stringParam(caveatParams, "end");
+
+        // If neither start nor end is specified, this caveat does not apply
+        if (startStr == null && endStr == null) {
+            return true;
+        }
 
         if (startStr != null) {
             Instant start = Instant.from(DateTimeFormatter.ISO_DATE_TIME.parse(startStr));

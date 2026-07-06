@@ -1,0 +1,16 @@
+server:
+  port: 8082
+
+oac:
+  enforcement:
+    contract-paths:
+      - classpath:order-service-api.yaml
+    pdp-url: http://localhost:8080
+    identity:
+      user-header: X-User-Id
+      service-header: X-Service-Id
+    fail-closed: true
+
+logging:
+  level:
+    com.oac.example: DEBUG

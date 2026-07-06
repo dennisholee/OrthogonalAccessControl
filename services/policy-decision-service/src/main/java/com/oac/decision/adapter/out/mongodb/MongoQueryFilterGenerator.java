@@ -93,8 +93,8 @@ public class MongoQueryFilterGenerator {
         if (accessMap != null) {
             for (String field : accessMap.getMaskedFields()) {
                 // Replace masked field with a redacted value
-                Document redactValue = new Document("$cond", List.of(
-                        new Document("$eq", List.of("$" + field, null)),
+                Document redactValue = new Document("$cond", java.util.Arrays.asList(
+                        new Document("$eq", java.util.Arrays.asList("$" + field, null)),
                         null,
                         "*** REDACTED ***"
                 ));
@@ -153,8 +153,8 @@ public class MongoQueryFilterGenerator {
 
     private static Document buildMaskProjection(String field) {
         // For masked fields, we keep the field in projection but replace the value
-        Document cond = new Document("$cond", List.of(
-                new Document("$eq", List.of("$" + field, null)),
+        Document cond = new Document("$cond", java.util.Arrays.asList(
+                new Document("$eq", java.util.Arrays.asList("$" + field, null)),
                 null,
                 "*** REDACTED ***"
         ));

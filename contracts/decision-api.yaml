@@ -1,14 +1,28 @@
 openapi: 3.1.0
 info:
   title: Orthogonal Access Control Decision API
-  version: 0.1.0
-  description: Contract for authorization decisions with explicit deny precedence and explainability.
+  version: 0.2.0
+  description: |
+    Contract for authorization decisions with explicit deny precedence,
+    explainability, field-level attribute access, and semantic enrichment.
+    This API is optimized for OpenAPI Generator with Spring Boot 3.
+
 servers:
   - url: https://authz.internal.example
+  - url: http://localhost:8080
+    description: Local development
+
+tags:
+  - name: Authorization Decisions
+    description: Check permissions and lookup resources
+  - name: Semantic Enrichment
+    description: Field-level access control and caveat evaluation
+
 paths:
   /v1/decisions/check-permission:
     post:
-      summary: Check a single authorization decision
+      tags: [Authorization Decisions]
+      summary: Check a single authorization decision with semantic enrichment
       operationId: checkPermission
       requestBody:
         required: true
@@ -16,9 +30,26 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/CheckPermissionRequest'
+            example:
+              subject:
+                type: human
+                id: alice
+              action: READ
+              resource:
+                type: order
+                id: ORD-789
+              boundaryContext:
+                tenant: acme-corp
+                geography: EU
+                market: enterprise
+                lineOfBusiness: supply-chain
+                channel: staff
+              runtimeContext:
+                sourceIp: 10.0.0.55
+                requestTime: 2026-06-25T08:30:00Z
       responses:
         '200':
-          description: Decision result
+          description: Decision result with optional field-level access map
           content:
             application/json:
               schema:
@@ -35,8 +66,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+
   /v1/decisions/lookup-resources:
     post:
+      tags: [Authorization Decisions]
       summary: Lookup resources authorized for subject and action
       operationId: lookupResources
       requestBody:
@@ -58,8 +91,13 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+
 components:
   schemas:
+    # ──────────────────────────────────────────────
+    #  IDENTITY & CONTEXT
+    # ──────────────────────────────────────────────
+
     SubjectRef:
       type: object
       required: [type, id]
@@ -67,8 +105,13 @@ components:
         type:
           type: string
           enum: [human, workload, batch, delegated]
+          x-enum-varnames: [HUMAN, WORKLOAD, BATCH, DELEGATED]
         id:
           type: string
+      example:
+        type: human
+        id: alice
+
     ResourceRef:
       type: object
       required: [type, id]
@@ -77,107 +120,301 @@ components:
           type: string
         id:
           type: string
+      example:
+        type: order
+        id: ORD-789
+
+    # ──────────────────────────────────────────────
+    #  FIVE ORTHOGONAL BOUNDARY DIMENSIONS
+    # ──────────────────────────────────────────────
+
     BoundaryContext:
       type: object
       required: [tenant, geography, market, lineOfBusiness, channel]
+      x-class-extra-annotation: "@jakarta.validation.Valid"
       properties:
         tenant:
           type: string
+          x-field-extra-annotation: "@jakarta.validation.constraints.NotBlank"
         geography:
           type: string
+          x-field-extra-annotation: "@jakarta.validation.constraints.NotBlank"
         market:
           type: string
+          x-field-extra-annotation: "@jakarta.validation.constraints.NotBlank"
         lineOfBusiness:
           type: string
+          x-field-extra-annotation: "@jakarta.validation.constraints.NotBlank"
         channel:
           type: string
+          x-field-extra-annotation: "@jakarta.validation.constraints.NotBlank"
+      example:
+        tenant: acme-corp
+        geography: EU
+        market: enterprise
+        lineOfBusiness: supply-chain
+        channel: staff
+
+    # ──────────────────────────────────────────────
+    #  RUNTIME CONTEXT — typed for caveat evaluation
+    # ──────────────────────────────────────────────
+
+    RuntimeContext:
+      type: object
+      description: |
+        Runtime context for caveat evaluation and semantic enrichment.
+        Extensible via additionalProperties for custom attributes.
+      properties:
+        sourceIp:
+          type: string
+          format: ipv4
+          description: Source IP for IP-range caveat evaluation
+        requestTime:
+          type: string
+          format: date-time
+          description: Request timestamp for time-window caveat evaluation
+        resourceTenant:
+          type: string
+        resourceGeography:
+          type: string
+        resourceMarket:
+          type: string
+        resourceLineOfBusiness:
+          type: string
+        resourceChannel:
+          type: string
+        relationship:
+          type: string
+          description: Runtime relationship override for ReBAC evaluation
+        simulatedRegionalLagMs:
+          type: integer
+          minimum: 0
+          description: Optional regional lag simulation input for resilience validation
+        replicaVersion:
+          type: integer
+          minimum: 0
+        minimumReplicaVersion:
+          type: integer
+          minimum: 0
+      additionalProperties:
+        type: object
+      example:
+        sourceIp: 10.0.0.55
+        requestTime: 2026-06-25T08:30:00Z
+        resourceTenant: tenant-a
+        resourceGeography: us
+        resourceMarket: retail
+        resourceLineOfBusiness: cards
+        resourceChannel: staff
+
+    # ──────────────────────────────────────────────
+    #  FIELD-LEVEL ACCESS CONTROL
+    # ──────────────────────────────────────────────
+
+    AccessLevel:
+      type: string
+      description: Access level for a specific field
+      enum: [READ, MASK, NONE]
+      x-enum-varnames: [READ, MASK, NONE]
+
+    AttributeAccessMap:
+      type: object
+      description: |
+        Map of field paths to access levels.
+        Resolution order: field-level ACL > tag-based PII > default READ.
+      additionalProperties:
+        $ref: '#/components/schemas/AccessLevel'
+      example:
+        customer.email: MASK
+        customer.ssn: NONE
+        customer.phone: MASK
+        order.total: READ
+        customer.*: NONE
+
+    Obligation:
+      type: object
+      description: |
+        Obligation to be enforced by the caller after a decision.
+        Common types include field masking, audit logging, and data retention.
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [FIELD_MASK, REDACT, AUDIT, LOG]
+          x-enum-varnames: [FIELD_MASK, REDACT, AUDIT, LOG]
+        fields:
+          type: array
+          items:
+            type: string
+          description: Fields affected by this obligation
+        maskPattern:
+          type: string
+          description: Mask pattern for FIELD_MASK obligations
+        retention:
+          type: string
+          description: Retention period for LOG obligations
+      example:
+        type: FIELD_MASK
+        fields: [customer.email]
+        maskPattern: "****@****.***"
+
+    # ──────────────────────────────────────────────
+    #  REQUEST / RESPONSE SCHEMAS
+    # ──────────────────────────────────────────────
+
     CheckPermissionRequest:
       type: object
+      description: |
+        Request to check an authorization decision.
+        All required fields must be provided for unambiguous evaluation.
       required: [subject, action, resource, boundaryContext]
+      x-class-extra-annotation: "@jakarta.validation.Valid"
       properties:
         subject:
           $ref: '#/components/schemas/SubjectRef'
+          x-field-extra-annotation: "@jakarta.validation.constraints.NotNull"
         action:
           type: string
+          x-field-extra-annotation: "@jakarta.validation.constraints.NotBlank"
         resource:
           $ref: '#/components/schemas/ResourceRef'
+          x-field-extra-annotation: "@jakarta.validation.constraints.NotNull"
         boundaryContext:
           $ref: '#/components/schemas/BoundaryContext'
+          x-field-extra-annotation: "@jakarta.validation.constraints.NotNull"
         runtimeContext:
-          type: object
-          additionalProperties: true
+          $ref: '#/components/schemas/RuntimeContext'
         consistencyToken:
           type: string
-          description: Optional causal consistency token for critical read-after-write paths.
+          description: Optional causal consistency token for critical read-after-write paths
         strictConsistency:
           type: boolean
-          description: Enables strict consistency-token validation for critical operations.
+          description: Enables strict consistency-token validation for critical operations
         endpointClassification:
           type: string
           enum: [FAIL_CLOSED, FAIL_OPEN]
-          description: Endpoint continuity class used during dependency outage handling.
+          x-enum-varnames: [FAIL_CLOSED, FAIL_OPEN]
+          description: Endpoint continuity class during dependency outage
         endpointKey:
           type: string
-          description: Registry key used to validate fail-open endpoint eligibility.
+          description: Registry key used to validate fail-open endpoint eligibility
         requestId:
           type: string
+      example:
+        subject:
+          type: human
+          id: alice
+        action: READ
+        resource:
+          type: order
+          id: ORD-789
+        boundaryContext:
+          tenant: acme-corp
+          geography: EU
+          market: enterprise
+          lineOfBusiness: supply-chain
+          channel: staff
+        runtimeContext:
+          sourceIp: 10.0.0.55
+          requestTime: 2026-06-25T08:30:00Z
+        strictConsistency: false
+
     CheckPermissionResponse:
       type: object
+      description: |
+        Authorization decision with optional field-level access map and obligations.
+        The decision field indicates the binary outcome.
+        attributeAccessMap and obligations provide semantic enrichment.
       required: [decision, decisionCode, evaluatedAt]
       properties:
         decision:
           type: string
-          enum: [ALLOW, DENY, CONDITIONAL_DENY]
+          enum: [ALLOW, DENY, ALLOW_WITH_CAVEATS]
+          x-enum-varnames: [ALLOW, DENY, ALLOW_WITH_CAVEATS]
         decisionCode:
           type: string
+          description: |
+            Structured code identifying the rule that produced the decision.
+            Examples: DECISION_EXPLICIT_DENY, DECISION_POLICY_ALLOW,
+            DECISION_DEFAULT_DENY, DECISION_CAVEAT_FAILED,
+            DECISION_REBAC_NO_RELATIONSHIP, DECISION_BOUNDARY_DENY
         matchedPolicies:
           type: array
           items:
             type: string
+          description: Policy names that matched and contributed to the decision
+        attributeAccessMap:
+          $ref: '#/components/schemas/AttributeAccessMap'
+          description: |
+            Field-level access levels for semantic enforcement.
+            Present when decision is ALLOW or ALLOW_WITH_CAVEATS.
         obligations:
           type: array
           items:
-            type: object
-            additionalProperties: true
+            $ref: '#/components/schemas/Obligation'
+          description: Obligations to enforce (field masks, audit, etc.)
         explanationRefs:
           type: array
           items:
             type: string
+          description: References to evidence for explainable decisions
         evaluatedAt:
           type: string
           format: date-time
+        consistencyToken:
+          type: string
+          description: New consistency token for read-your-writes after policy/relationship writes
+      example:
+        decision: ALLOW
+        decisionCode: ALLOW_WITH_CAVEATS
+        matchedPolicies: [POL.RBAC.CSR.READ.ORDER.v1]
+        attributeAccessMap:
+          customer.email: MASK
+          customer.ssn: NONE
+          order.total: READ
+        obligations:
+          - type: FIELD_MASK
+            fields: [customer.email]
+            maskPattern: "****@****.***"
+        evaluatedAt: 2026-06-25T08:30:00.123Z
+        consistencyToken: ct-abc123
+
+    # ──────────────────────────────────────────────
+    #  LOOKUP RESOURCES
+    # ──────────────────────────────────────────────
+
     LookupResourcesRequest:
       type: object
       required: [subject, action, resourceType, boundaryContext]
+      x-class-extra-annotation: "@jakarta.validation.Valid"
       properties:
         subject:
           $ref: '#/components/schemas/SubjectRef'
+          x-field-extra-annotation: "@jakarta.validation.constraints.NotNull"
         action:
           type: string
+          x-field-extra-annotation: "@jakarta.validation.constraints.NotBlank"
         resourceType:
           type: string
+          x-field-extra-annotation: "@jakarta.validation.constraints.NotBlank"
         boundaryContext:
           $ref: '#/components/schemas/BoundaryContext'
+          x-field-extra-annotation: "@jakarta.validation.constraints.NotNull"
         consistencyToken:
           type: string
         strictConsistency:
           type: boolean
-          description: Enables strict consistency-token validation on lookup operations.
         requiredConsistencyToken:
           type: string
-          description: Reference token expected by the caller for strict consistency verification.
         simulatedRegionalLagMs:
           type: integer
           minimum: 0
-          description: Optional regional lag simulation input for resilience validation.
         replicaVersion:
           type: integer
           minimum: 0
-          description: Optional replica version observed by caller.
         minimumReplicaVersion:
           type: integer
           minimum: 0
-          description: Optional minimum acceptable replica version for strict consistency.
         pageSize:
           type: integer
           minimum: 1
@@ -185,6 +422,7 @@ components:
           default: 100
         pageToken:
           type: string
+
     LookupResourcesResponse:
       type: object
       required: [resourceIds]
@@ -195,22 +433,62 @@ components:
             type: string
         nextPageToken:
           type: string
+
+    # ──────────────────────────────────────────────
+    #  ERROR HANDLING
+    # ──────────────────────────────────────────────
+
+    DecisionCode:
+      type: string
+      enum:
+        - VALIDATION_ERROR
+        - DECISION_EXPLICIT_DENY
+        - DECISION_POLICY_ALLOW
+        - DECISION_DEFAULT_DENY
+        - DECISION_BOUNDARY_DENY
+        - DECISION_MISSING_BOUNDARY
+        - DECISION_CONSISTENCY_TOKEN_REQUIRED
+        - DECISION_REGIONAL_REPLICA_LAG
+        - DECISION_REBAC_NO_RELATIONSHIP
+        - DECISION_CAVEAT_FAILED
+        - DECISION_DEPENDENCY_UNAVAILABLE
+        - DECISION_POLICY_ALLOW_WITH_CAVEATS
+      x-enum-varnames:
+        - VALIDATION_ERROR
+        - DECISION_EXPLICIT_DENY
+        - DECISION_POLICY_ALLOW
+        - DECISION_DEFAULT_DENY
+        - DECISION_BOUNDARY_DENY
+        - DECISION_MISSING_BOUNDARY
+        - DECISION_CONSISTENCY_TOKEN_REQUIRED
+        - DECISION_REGIONAL_REPLICA_LAG
+        - DECISION_REBAC_NO_RELATIONSHIP
+        - DECISION_CAVEAT_FAILED
+        - DECISION_DEPENDENCY_UNAVAILABLE
+        - DECISION_POLICY_ALLOW_WITH_CAVEATS
+
     ErrorItem:
       type: object
       required: [code, message, retryable]
       properties:
         code:
-          type: string
+          allOf:
+            - $ref: '#/components/schemas/DecisionCode'
         message:
           type: string
         retryable:
           type: boolean
+      example:
+        code: VALIDATION_ERROR
+        message: Missing required field: action
+        retryable: false
+
     ErrorResponse:
       type: object
       required: [decisionCode, errors]
       properties:
         decisionCode:
-          type: string
+          $ref: '#/components/schemas/DecisionCode'
         errors:
           type: array
           items:

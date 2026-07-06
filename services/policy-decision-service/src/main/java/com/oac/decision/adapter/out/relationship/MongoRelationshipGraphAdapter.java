@@ -11,13 +11,12 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
-import java.util.stream.Collectors;
 
 /**
  * MongoDB-backed ReBAC relationship graph adapter.
- * Implements bounded BFS traversal up to configurable max depth (default 3 hops)
- * for relationship graph queries, with boundary context filtering.
+ * Implements bounded BFS traversal using raw Map documents.
  */
 @Component
 @Profile("mongodb")
@@ -34,174 +33,75 @@ public class MongoRelationshipGraphAdapter implements RelationshipGraphPort {
 
     @Override
     public List<RelationshipEdge> findRelationships(CheckPermissionRequest request) {
-        Criteria criteria = Criteria.where("subjectId").is(request.subject().id())
-                .and("resourceId").is(request.resource().id())
-                .and("resourceType").is(request.resource().type())
-                .andOperator(
-                        Criteria.where("validFrom").lte(Instant.now()),
-                        new Criteria().orOperator(
-                                Criteria.where("validUntil").exists(false),
-                                Criteria.where("validUntil").isNull(),
-                                Criteria.where("validUntil").gt(Instant.now())
-                        )
-                );
-
-        if (request.boundaryContext() != null) {
-            criteria = applyBoundaryFilter(criteria, request.boundaryContext());
-        }
-
-        return mongoTemplate.find(Query.query(criteria), RelationshipEdge.class, COLLECTION);
+        List<Map> docs = mongoTemplate.find(Query.query(
+                Criteria.where("subjectId").is(request.subject().id())
+                        .and("resourceId").is(request.resource().id())
+        ), Map.class, COLLECTION);
+        return docs.stream().map(this::toEdge).filter(RelationshipEdge::isActive).toList();
     }
 
     @Override
     public List<String> findRelatedResourceIds(
-            String subjectId,
-            String resourceType,
-            String relationshipType,
-            int maxDepth
-    ) {
+            String subjectId, String resourceType, String relationshipType, int maxDepth) {
         if (maxDepth <= 0) maxDepth = DEFAULT_MAX_DEPTH;
-
         Set<String> visited = new HashSet<>();
         Deque<BfsNode> queue = new ArrayDeque<>();
         Set<String> result = new HashSet<>();
-
-        // Level 0: direct relationships from subject
         queue.add(new BfsNode(subjectId, "subject", 0));
-
         while (!queue.isEmpty()) {
             BfsNode current = queue.pollFirst();
             if (current.depth > maxDepth) continue;
-
-            String nodeKey = current.nodeType + ":" + current.nodeId;
-            if (!visited.add(nodeKey)) continue;
-
+            if (!visited.add(current.nodeType + ":" + current.nodeId)) continue;
             if (current.depth > 0 && "resource".equals(current.nodeType)) {
                 result.add(current.nodeId);
                 continue;
             }
-
-            // Find outgoing edges from this node
-            Criteria edgeCriteria;
-            if ("subject".equals(current.nodeType)) {
-                edgeCriteria = Criteria.where("subjectId").is(current.nodeId);
-            } else {
-                edgeCriteria = Criteria.where("resourceId").is(current.nodeId);
-            }
-            if (relationshipType != null) {
-                edgeCriteria = edgeCriteria.and("relationshipType").is(relationshipType);
-            }
-            if (resourceType != null) {
-                edgeCriteria = edgeCriteria.and("resourceType").is(resourceType);
-            }
-            edgeCriteria = edgeCriteria.andOperator(
-                    Criteria.where("validFrom").lte(Instant.now()),
-                    new Criteria().orOperator(
-                            Criteria.where("validUntil").exists(false),
-                            Criteria.where("validUntil").isNull(),
-                            Criteria.where("validUntil").gt(Instant.now())
-                    )
-            );
-
-            List<RelationshipEdge> edges = mongoTemplate.find(
-                    Query.query(edgeCriteria), RelationshipEdge.class, COLLECTION);
-
-            for (RelationshipEdge edge : edges) {
-                if ("subject".equals(current.nodeType)) {
-                    // subject -> resource
-                    queue.add(new BfsNode(edge.resourceId(), "resource", current.depth + 1));
-                } else {
-                    // resource -> subject (reverse direction for inherited relationships)
-                    queue.add(new BfsNode(edge.subjectId(), "subject", current.depth + 1));
-                }
+            for (Map edge : findEdges(current.nodeId, current.nodeType, relationshipType, resourceType)) {
+                if (isExpired(edge)) continue;
+                if ("subject".equals(current.nodeType))
+                    queue.add(new BfsNode(str(edge, "resourceId"), "resource", current.depth + 1));
+                else
+                    queue.add(new BfsNode(str(edge, "subjectId"), "subject", current.depth + 1));
             }
         }
-
         return new ArrayList<>(result);
     }
 
     @Override
-    public Set<String> traverseResources(
-            String subjectId,
-            String resourceType,
-            int maxDepth
-    ) {
+    public Set<String> traverseResources(String subjectId, String resourceType, int maxDepth) {
         if (maxDepth <= 0) maxDepth = DEFAULT_MAX_DEPTH;
-
         Set<String> visited = new HashSet<>();
         Deque<BfsNode> queue = new ArrayDeque<>();
         Set<String> result = new HashSet<>();
-
         queue.add(new BfsNode(subjectId, "subject", 0));
-
         while (!queue.isEmpty()) {
             BfsNode current = queue.pollFirst();
             if (current.depth > maxDepth) continue;
-
-            String nodeKey = current.nodeType + ":" + current.nodeId;
-            if (!visited.add(nodeKey)) continue;
-
+            if (!visited.add(current.nodeType + ":" + current.nodeId)) continue;
             if (current.depth > 0 && "resource".equals(current.nodeType)) {
                 result.add(current.nodeId);
-                if (current.depth < maxDepth) {
-                    // Check for further traversal through this resource
+                if (current.depth < maxDepth)
                     queue.add(new BfsNode(current.nodeId, "resource_continue", current.depth));
-                }
                 continue;
             }
-
-            Criteria edgeCriteria;
-            if ("subject".equals(current.nodeType) || "resource".equals(current.nodeType)) {
-                edgeCriteria = Criteria.where("subjectId").is(current.nodeId);
-            } else {
-                edgeCriteria = new Criteria().orOperator(
-                        Criteria.where("resourceId").is(current.nodeId),
-                        Criteria.where("subjectId").is(current.nodeId)
-                );
-            }
-            if (resourceType != null) {
-                edgeCriteria = edgeCriteria.and("resourceType").is(resourceType);
-            }
-            edgeCriteria = edgeCriteria.andOperator(
-                    Criteria.where("validFrom").lte(Instant.now()),
-                    new Criteria().orOperator(
-                            Criteria.where("validUntil").exists(false),
-                            Criteria.where("validUntil").isNull(),
-                            Criteria.where("validUntil").gt(Instant.now())
-                    )
-            );
-
-            List<RelationshipEdge> edges = mongoTemplate.find(
-                    Query.query(edgeCriteria), RelationshipEdge.class, COLLECTION);
-
-            for (RelationshipEdge edge : edges) {
-                queue.add(new BfsNode(edge.resourceId(), "resource", current.depth + 1));
+            Criteria c = "subject".equals(current.nodeType)
+                    ? Criteria.where("subjectId").is(current.nodeId)
+                    : Criteria.where("resourceId").is(current.nodeId);
+            if (resourceType != null) c = c.and("resourceType").is(resourceType);
+            for (Map edge : mongoTemplate.find(Query.query(c), Map.class, COLLECTION)) {
+                if (isExpired(edge)) continue;
+                if ("subject".equals(current.nodeType))
+                    queue.add(new BfsNode(str(edge, "resourceId"), "resource", current.depth + 1));
+                else
+                    queue.add(new BfsNode(str(edge, "subjectId"), "subject", current.depth + 1));
             }
         }
-
         return result;
     }
 
     @Override
-    public String createRelationship(RelationshipEdge edge) {
-        RelationshipEdge saved = mongoTemplate.save(edge, COLLECTION);
-        return saved.id();
-    }
-
-    @Override
-    public void revokeRelationship(String relationshipId) {
-        mongoTemplate.remove(Query.query(Criteria.where("id").is(relationshipId)), COLLECTION);
-    }
-
-    @Override
-    public boolean hasRelationship(
-            String subjectId,
-            String resourceId,
-            String relationshipType,
-            int maxDepth
-    ) {
+    public boolean hasRelationship(String subjectId, String resourceId, String relationshipType, int maxDepth) {
         if (maxDepth <= 0) maxDepth = DEFAULT_MAX_DEPTH;
-
         Set<String> visited = new HashSet<>();
         Deque<BfsNode> queue = new ArrayDeque<>();
         queue.add(new BfsNode(subjectId, "subject", 0));
@@ -209,69 +109,93 @@ public class MongoRelationshipGraphAdapter implements RelationshipGraphPort {
         while (!queue.isEmpty()) {
             BfsNode current = queue.pollFirst();
             if (current.depth > maxDepth) continue;
+            if (!visited.add(current.nodeType + ":" + current.nodeId)) continue;
 
-            String nodeKey = current.nodeType + ":" + current.nodeId;
-            if (!visited.add(nodeKey)) continue;
-
-            // Check direct relationship at this node
+            // Direct forward: subjectId=current → resourceId=target
             Criteria directCheck = Criteria.where("subjectId").is(current.nodeId)
                     .and("resourceId").is(resourceId);
-            if (relationshipType != null) {
-                directCheck = directCheck.and("relationshipType").is(relationshipType);
+            if (relationshipType != null) directCheck = directCheck.and("relationshipType").is(relationshipType);
+            for (Map edge : mongoTemplate.find(Query.query(directCheck), Map.class, COLLECTION)) {
+                if (!isExpired(edge)) return true;
             }
-            directCheck = directCheck.andOperator(
-                    Criteria.where("validFrom").lte(Instant.now()),
-                    new Criteria().orOperator(
-                            Criteria.where("validUntil").exists(false),
-                            Criteria.where("validUntil").isNull(),
-                            Criteria.where("validUntil").gt(Instant.now())
-                    )
-            );
 
-            long count = mongoTemplate.count(
-                    Query.query(directCheck), RelationshipEdge.class, COLLECTION);
-            if (count > 0) return true;
-
-            if (current.depth < maxDepth) {
-                // Traverse further
-                Criteria edgeCriteria = Criteria.where("subjectId").is(current.nodeId);
-                edgeCriteria = edgeCriteria.andOperator(
-                        Criteria.where("validFrom").lte(Instant.now()),
-                        new Criteria().orOperator(
-                                Criteria.where("validUntil").exists(false),
-                                Criteria.where("validUntil").isNull(),
-                                Criteria.where("validUntil").gt(Instant.now())
-                        )
-                );
-
-                List<RelationshipEdge> edges = mongoTemplate.find(
-                        Query.query(edgeCriteria), RelationshipEdge.class, COLLECTION);
-                for (RelationshipEdge edge : edges) {
-                    queue.add(new BfsNode(edge.resourceId(), "resource", current.depth + 1));
+            // Reverse: subjectId=target → resourceId=current (for depth>0)
+            if (current.depth > 0) {
+                Criteria reverseCheck = Criteria.where("subjectId").is(resourceId)
+                        .and("resourceId").is(current.nodeId);
+                if (relationshipType != null) reverseCheck = reverseCheck.and("relationshipType").is(relationshipType);
+                for (Map edge : mongoTemplate.find(Query.query(reverseCheck), Map.class, COLLECTION)) {
+                    if (!isExpired(edge)) return true;
                 }
             }
-        }
 
+            if (current.depth >= maxDepth) continue;
+
+            // Forward edges (subject → resource)
+            for (Map edge : mongoTemplate.find(Query.query(
+                    Criteria.where("subjectId").is(current.nodeId)), Map.class, COLLECTION)) {
+                if (isExpired(edge)) continue;
+                queue.add(new BfsNode(str(edge, "resourceId"), "resource", current.depth + 1));
+            }
+
+            // Reverse edges (resource ← subject)
+            for (Map edge : mongoTemplate.find(Query.query(
+                    Criteria.where("resourceId").is(current.nodeId)), Map.class, COLLECTION)) {
+                if (isExpired(edge)) continue;
+                String otherType = "subject".equals(current.nodeType) ? "resource" : "subject";
+                String otherId = "subject".equals(current.nodeType)
+                        ? str(edge, "resourceId") : str(edge, "subjectId");
+                queue.add(new BfsNode(otherId, otherType, current.depth + 1));
+            }
+        }
         return false;
     }
 
+    /** Check if a Map-based edge document has expired. */
+    private boolean isExpired(Map edge) {
+        Object exp = edge.get("expiresAt");
+        if (exp == null) return false;
+        try { return Instant.now().isAfter(Instant.from(DateTimeFormatter.ISO_DATE_TIME.parse(exp.toString()))); }
+        catch (Exception e) { return false; }
+    }
+
     @Override
-    public int getMaxTraversalDepth() {
-        return DEFAULT_MAX_DEPTH;
+    public String createRelationship(RelationshipEdge edge) {
+        var saved = mongoTemplate.insert(edge, COLLECTION);
+        org.bson.Document q = mongoTemplate.getCollection(COLLECTION).find()
+                .sort(new org.bson.Document("_id", -1)).first();
+        return q != null ? q.getObjectId("_id").toHexString() : UUID.randomUUID().toString();
     }
 
-    private Criteria applyBoundaryFilter(Criteria criteria, BoundaryContext boundary) {
-        List<Criteria> boundaryCriteria = new ArrayList<>();
-        if (boundary.tenant() != null) boundaryCriteria.add(Criteria.where("boundaryContext.tenant").is(boundary.tenant()));
-        if (boundary.geography() != null) boundaryCriteria.add(Criteria.where("boundaryContext.geography").is(boundary.geography()));
-        if (boundary.market() != null) boundaryCriteria.add(Criteria.where("boundaryContext.market").is(boundary.market()));
-        if (boundary.lineOfBusiness() != null) boundaryCriteria.add(Criteria.where("boundaryContext.lineOfBusiness").is(boundary.lineOfBusiness()));
-        if (boundary.channel() != null) boundaryCriteria.add(Criteria.where("boundaryContext.channel").is(boundary.channel()));
-        if (!boundaryCriteria.isEmpty()) {
-            criteria = criteria.andOperator(boundaryCriteria.toArray(new Criteria[0]));
-        }
-        return criteria;
+    @Override
+    public void revokeRelationship(String relationshipId) {
+        mongoTemplate.remove(Query.query(Criteria.where("_id").is(new org.bson.types.ObjectId(relationshipId))), COLLECTION);
     }
 
+    @Override
+    public int getMaxTraversalDepth() { return DEFAULT_MAX_DEPTH; }
+
+    private List<Map> findEdges(String nodeId, String nodeType, String relationshipType, String resourceType) {
+        Criteria c = "subject".equals(nodeType)
+                ? Criteria.where("subjectId").is(nodeId)
+                : Criteria.where("resourceId").is(nodeId);
+        if (relationshipType != null) c = c.and("relationshipType").is(relationshipType);
+        if (resourceType != null) c = c.and("resourceType").is(resourceType);
+        return mongoTemplate.find(Query.query(c), Map.class, COLLECTION);
+    }
+
+    private RelationshipEdge toEdge(Map doc) {
+        return new RelationshipEdge(str(doc, "id"), str(doc, "subjectId"), str(doc, "subjectType"),
+                str(doc, "relationshipType"), str(doc, "resourceId"), str(doc, "resourceType"),
+                null, parseInstant(doc, "validFrom"), parseInstant(doc, "validUntil"), null);
+    }
+
+    private String str(Map doc, String key) { Object v = doc.get(key); return v == null ? null : v.toString(); }
+    private Instant parseInstant(Map doc, String key) {
+        Object v = doc.get(key);
+        if (v == null) return null;
+        if (v instanceof Instant i) return i;
+        try { return Instant.from(DateTimeFormatter.ISO_DATE_TIME.parse(v.toString())); } catch (Exception e) { return null; }
+    }
     private record BfsNode(String nodeId, String nodeType, int depth) {}
 }

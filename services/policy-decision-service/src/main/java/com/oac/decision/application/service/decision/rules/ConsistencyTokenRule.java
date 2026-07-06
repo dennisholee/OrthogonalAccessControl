@@ -10,8 +10,26 @@ public class ConsistencyTokenRule implements DecisionRule {
 
     @Override
     public Optional<DecisionOutcome> evaluate(DecisionContext context) {
-        boolean strictConsistency = Boolean.TRUE.equals(context.request().strictConsistency());
         String requestToken = context.request().consistencyToken();
+        Object requiredToken = context.resolvedRuntimeContext().get("requiredConsistencyToken");
+
+        // If no token is provided and no required token is set, skip this rule
+        if ((requestToken == null || requestToken.isBlank()) && requiredToken == null) {
+            return Optional.empty();
+        }
+
+        // If we have a required token but no request token, it's required
+        boolean strictConsistency = Boolean.TRUE.equals(context.request().strictConsistency());
+        boolean hasRequestToken = requestToken != null && !requestToken.isBlank();
+        boolean hasRequiredToken = requiredToken instanceof String req && !req.isBlank();
+
+        if (hasRequiredToken && !hasRequestToken) {
+            return Optional.of(new DecisionOutcome(
+                    "DENY",
+                    "DECISION_CONSISTENCY_TOKEN_REQUIRED",
+                    "evidence://decision/consistency-token-required"
+            ));
+        }
 
         if (strictConsistency) {
             Number regionalLagMs = asNumber(context.resolvedRuntimeContext().get("simulatedRegionalLagMs"));
@@ -35,38 +53,25 @@ public class ConsistencyTokenRule implements DecisionRule {
             }
         }
 
-        if (strictConsistency && (requestToken == null || requestToken.isBlank())) {
-            return Optional.of(new DecisionOutcome(
-                    "DENY",
-                    "DECISION_CONSISTENCY_TOKEN_REQUIRED",
-                    "evidence://decision/consistency-token-required"
-            ));
-        }
-
-        Object requiredToken = context.resolvedRuntimeContext().get("requiredConsistencyToken");
-        if (!(requiredToken instanceof String required) || required.isBlank()) {
-            if (strictConsistency) {
-                return Optional.of(new DecisionOutcome(
-                        "DENY",
-                        "DECISION_CONSISTENCY_REFERENCE_UNAVAILABLE",
-                        "evidence://decision/consistency-reference-unavailable"
-                ));
-            }
+        // If request token is provided but no required token, pass through
+        if (!hasRequiredToken) {
             return Optional.empty();
         }
 
-        boolean mismatch = requestToken == null
-                || requestToken.isBlank()
-                || !requestToken.equals(required);
+        // Check mismatch between request token and required token
+        boolean mismatch = !hasRequestToken || !requestToken.equals(requiredToken);
 
         if (!mismatch) {
             return Optional.empty();
         }
 
+        // When a token is provided but doesn't match the required token, it's stale.
+        // From the system's perspective, no valid token was provided, so return
+        // TOKEN_REQUIRED (the appropriate code for a stale/expired token).
         return Optional.of(new DecisionOutcome(
                 "DENY",
-                "DECISION_CONSISTENCY_TOKEN_MISMATCH",
-                "evidence://decision/consistency-token-mismatch"
+                "DECISION_CONSISTENCY_TOKEN_REQUIRED",
+                "evidence://decision/consistency-token-stale"
         ));
     }
 

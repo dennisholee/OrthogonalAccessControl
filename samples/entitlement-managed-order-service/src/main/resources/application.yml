@@ -1,0 +1,17 @@
+server:
+  port: 8081
+
+spring:
+  data:
+    mongodb:
+      uri: mongodb://localhost:27017/oac_sample
+      auto-index-creation: true
+
+oac:
+  pdp:
+    url: http://localhost:8080
+
+logging:
+  level:
+    com.oac.sample: DEBUG
+    com.oac.enforcement: DEBUG

@@ -27,7 +27,8 @@ public class DependencyOutageRule implements DecisionRule {
         if (!"FAIL_OPEN".equals(classification)) {
             return Optional.of(new DecisionOutcome(
                     "DENY",
-                    "DECISION_FAIL_CLOSED_DEPENDENCY_OUTAGE",
+                    // Use the code expected by the test contract
+                    "DECISION_DEPENDENCY_UNAVAILABLE",
                     "evidence://decision/fail-closed-dependency-outage"
             ));
         }

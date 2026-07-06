@@ -1,0 +1,86 @@
+[
+  {
+    "name": "POL.DENY.ATTACKER.v1",
+    "effect": "DENY",
+    "subject": { "type": "human", "id": "attacker" },
+    "action": "*",
+    "resource": { "type": "*", "id": "*" },
+    "boundaryContext": {
+      "tenant": "*", "geography": "*", "market": "*", "lineOfBusiness": "*", "channel": "*"
+    },
+    "riskLevel": "CRITICAL",
+    "reason": "Compromised user — deny all access"
+  },
+  {
+    "name": "POL.RBAC.CSR.READ.ORDER.v1",
+    "effect": "ALLOW",
+    "subject": { "type": "human", "roles": ["csr"] },
+    "action": "READ",
+    "resource": { "type": "order" },
+    "boundaryContext": {
+      "tenant": "acme-corp", "geography": "global", "market": "enterprise",
+      "lineOfBusiness": "ecommerce", "channel": "staff"
+    },
+    "attributeAccessMap": {
+      "customer.email": "MASK",
+      "customer.ssn": "NONE",
+      "customer.phone": "MASK",
+      "customer.name": "READ",
+      "order.*": "READ"
+    },
+    "riskLevel": "LOW"
+  },
+  {
+    "name": "POL.RBAC.AUDITOR.READ.ALL.v1",
+    "effect": "ALLOW",
+    "subject": { "type": "human", "roles": ["auditor"] },
+    "action": "READ",
+    "resource": { "type": "order" },
+    "boundaryContext": {
+      "tenant": "acme-corp", "geography": "*", "market": "*",
+      "lineOfBusiness": "*", "channel": "*"
+    },
+    "attributeAccessMap": {
+      "customer.*": "NONE",
+      "order.*": "READ"
+    },
+    "riskLevel": "LOW"
+  },
+  {
+    "name": "POL.WORKLOAD.REPORTING.READ_AGGREGATE.v1",
+    "effect": "ALLOW",
+    "subject": { "type": "workload", "id": "reporting-service" },
+    "action": "READ_AGGREGATE",
+    "resource": { "type": "order" },
+    "boundaryContext": {
+      "tenant": "acme-corp", "geography": "*", "market": "*",
+      "lineOfBusiness": "*", "channel": "system"
+    },
+    "riskLevel": "LOW"
+  },
+  {
+    "name": "POL.REBAC.MANAGER.APPROVE.ORDER.v1",
+    "effect": "ALLOW",
+    "subject": { "type": "human" },
+    "action": "APPROVE",
+    "resource": { "type": "order" },
+    "boundaryContext": {
+      "tenant": "acme-corp", "geography": "global", "market": "enterprise",
+      "lineOfBusiness": "ecommerce", "channel": "staff"
+    },
+    "relationships": { "edge": "manages", "target": "resource.ownerId" },
+    "riskLevel": "MEDIUM"
+  },
+  {
+    "name": "POL.RBAC.ADMIN.FULL.ACCESS.v1",
+    "effect": "ALLOW",
+    "subject": { "type": "human", "roles": ["admin"] },
+    "action": "*",
+    "resource": { "type": "order" },
+    "boundaryContext": {
+      "tenant": "acme-corp", "geography": "*", "market": "*",
+      "lineOfBusiness": "*", "channel": "staff"
+    },
+    "riskLevel": "MEDIUM"
+  }
+]

@@ -14,5 +14,7 @@ public enum AttributeAccessLevel {
     /** Field is entirely hidden from the caller */
     HIDDEN,
     /** Explicitly denied — access forbidden even at field level */
-    DENY
+    DENY,
+    /** No access / not exposed — field is excluded from response */
+    NONE
 }
