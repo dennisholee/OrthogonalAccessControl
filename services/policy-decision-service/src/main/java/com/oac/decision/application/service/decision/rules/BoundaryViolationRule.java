@@ -14,20 +14,25 @@ public class BoundaryViolationRule implements DecisionRule {
             return Optional.empty();
         }
 
+        var bc = context.request().boundaryContext();
+        if (bc == null) {
+            return Optional.empty();
+        }
+
         boolean hasBoundaryViolation = hasMismatch(
-                context.request().boundaryContext().tenant(),
+                bc.tenant(),
                 context.resolvedRuntimeContext().get("resourceTenant")
         ) || hasMismatch(
-                context.request().boundaryContext().geography(),
+                bc.geography(),
                 context.resolvedRuntimeContext().get("resourceGeography")
         ) || hasMismatch(
-                context.request().boundaryContext().market(),
+                bc.market(),
                 context.resolvedRuntimeContext().get("resourceMarket")
         ) || hasMismatch(
-                context.request().boundaryContext().lineOfBusiness(),
+                bc.lineOfBusiness(),
                 context.resolvedRuntimeContext().get("resourceLineOfBusiness")
         ) || hasMismatch(
-                context.request().boundaryContext().channel(),
+                bc.channel(),
                 context.resolvedRuntimeContext().get("resourceChannel")
         );
 
@@ -43,6 +48,9 @@ public class BoundaryViolationRule implements DecisionRule {
     }
 
     private boolean hasMismatch(String expectedBoundaryValue, Object runtimeValue) {
-        return runtimeValue instanceof String value && !expectedBoundaryValue.equals(value);
+        if (!(runtimeValue instanceof String value)) return false;
+        // Wildcard "*" matches anything
+        if ("*".equals(expectedBoundaryValue)) return false;
+        return !expectedBoundaryValue.equals(value);
     }
 }

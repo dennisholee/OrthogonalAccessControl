@@ -112,9 +112,16 @@ public class MongoRelationshipGraphAdapter implements RelationshipGraphPort {
             if (!visited.add(current.nodeType + ":" + current.nodeId)) continue;
 
             // Direct forward: subjectId=current → resourceId=target
+            // When relationshipType is provided, apply it to the direct edge check
+            // from the original source (depth=0). For intermediate hops (depth>0),
+            // DON'T apply the type filter because the intermediate edges may have
+            // different types (e.g., chain: bob→alice:manages, alice→ORD-789:owner).
+            String effectiveType = (current.depth == 0) ? relationshipType : null;
             Criteria directCheck = Criteria.where("subjectId").is(current.nodeId)
                     .and("resourceId").is(resourceId);
-            if (relationshipType != null) directCheck = directCheck.and("relationshipType").is(relationshipType);
+            if (effectiveType != null) {
+                directCheck = directCheck.and("relationshipType").is(effectiveType);
+            }
             for (Map edge : mongoTemplate.find(Query.query(directCheck), Map.class, COLLECTION)) {
                 if (!isExpired(edge)) return true;
             }
@@ -123,7 +130,9 @@ public class MongoRelationshipGraphAdapter implements RelationshipGraphPort {
             if (current.depth > 0) {
                 Criteria reverseCheck = Criteria.where("subjectId").is(resourceId)
                         .and("resourceId").is(current.nodeId);
-                if (relationshipType != null) reverseCheck = reverseCheck.and("relationshipType").is(relationshipType);
+                if (effectiveType != null) {
+                    reverseCheck = reverseCheck.and("relationshipType").is(effectiveType);
+                }
                 for (Map edge : mongoTemplate.find(Query.query(reverseCheck), Map.class, COLLECTION)) {
                     if (!isExpired(edge)) return true;
                 }

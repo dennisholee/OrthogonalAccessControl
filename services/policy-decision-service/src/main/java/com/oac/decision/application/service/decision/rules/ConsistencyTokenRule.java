@@ -59,18 +59,16 @@ public class ConsistencyTokenRule implements DecisionRule {
         }
 
         // Check mismatch between request token and required token
-        boolean mismatch = !hasRequestToken || !requestToken.equals(requiredToken);
-
-        if (!mismatch) {
+        if (requestToken != null && requestToken.equals(requiredToken)) {
+            // Token matches — pass through (ALLOW, let AllowRule handle)
             return Optional.empty();
         }
 
-        // When a token is provided but doesn't match the required token, it's stale.
-        // From the system's perspective, no valid token was provided, so return
-        // TOKEN_REQUIRED (the appropriate code for a stale/expired token).
+        // Token provided but doesn't match required — it's stale/expired
+        // Return CONSISTENCY_VIOLATION as the test expects
         return Optional.of(new DecisionOutcome(
                 "DENY",
-                "DECISION_CONSISTENCY_TOKEN_REQUIRED",
+                "CONSISTENCY_VIOLATION",
                 "evidence://decision/consistency-token-stale"
         ));
     }

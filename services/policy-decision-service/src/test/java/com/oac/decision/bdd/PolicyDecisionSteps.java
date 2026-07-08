@@ -19,6 +19,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 public class PolicyDecisionSteps {
 
+    private static final java.util.Set<String> TEST_COLLECTIONS = java.util.Set.of(
+            "policies", "relationships", "resource_grants", "pii_classification", "consistency_tokens");
+
     @Autowired
     private TestRestTemplate restTemplate;
 
@@ -44,8 +47,22 @@ public class PolicyDecisionSteps {
             mongoTemplate.dropCollection("relationships");
             mongoTemplate.dropCollection("resource_grants");
             mongoTemplate.dropCollection("pii_classification");
+            mongoTemplate.dropCollection("consistency_tokens");
         } catch (Exception e) {
             // Collections may not exist yet — safe to ignore
+        }
+
+        // Assert empty-slate precondition: all test collections must be empty
+        // This catches cross-scenario data leakage that could silently change test outcomes
+        try {
+            for (String collection : TEST_COLLECTIONS) {
+                long count = mongoTemplate.count(org.springframework.data.mongodb.core.query.Query.query(
+                        new org.springframework.data.mongodb.core.query.Criteria()), collection);
+                org.junit.jupiter.api.Assertions.assertEquals(0, count,
+                        "Precondition: collection '" + collection + "' should be empty before scenario");
+            }
+        } catch (Exception e) {
+            // If count fails (collection just dropped), that's fine
         }
 
         // Reset state between scenarios
@@ -181,8 +198,8 @@ public class PolicyDecisionSteps {
         policy.put("effect", effect);
         policy.put("state", "ACTIVE");
         policy.put("requiredRelationship", relationshipType);
-        policy.put("action", "approve");
-        policy.put("resourceType", "order");
+        // Don't hardcode action/resourceType; the policies must match the request context
+        // which is set by subsequent Given steps (subject, action, resource, boundary)
         mongoTemplate.save(policy, "policies");
         screenCapture.captureSeedData("policies (" + name + " ReBAC)", policy);
         screenCapture.log("Saved ReBAC policy: requires " + relationshipType);
@@ -336,6 +353,86 @@ public class PolicyDecisionSteps {
         this.requestBody.put("consistencyToken", token);
     }
 
+    @Given("a policy document with effect {string} and SpEL condition {string} is saved to MongoDB")
+    public void savePolicyWithSpelCondition(String effect, String spelCondition) {
+        Map<String, Object> policy = new LinkedHashMap<>();
+        String name = "POL.SPEL." + UUID.randomUUID().toString().substring(0, 8);
+        policy.put("name", name);
+        policy.put("effect", effect);
+        policy.put("state", "ACTIVE");
+        policy.put("spelCondition", spelCondition);
+        mongoTemplate.save(policy, "policies");
+        screenCapture.captureSeedData("policies (" + name + " SpEL)", policy);
+        screenCapture.log("Saved policy with SpEL condition: " + spelCondition);
+    }
+
+    @Given("a subject with id {string} and department {string}")
+    public void setSubjectWithDepartment(String id, String department) {
+        this.requestBody.put("subject", Map.of("type", "human", "id", id, "department", department));
+        this.runtimeContext.put("subjectDepartment", department);
+    }
+
+    @Given("a relationship chain {string}")
+    public void saveRelationshipChain(String chain) {
+        // Format: "CEO->VP->Director->CSR:manages" or "alice->ORD-001:approver"
+        int colonIdx = chain.lastIndexOf(':');
+        if (colonIdx == -1) {
+            throw new IllegalArgumentException("Relationship chain must specify type after colon: " + chain);
+        }
+        String relationshipType = chain.substring(colonIdx + 1);
+        String pathPart = chain.substring(0, colonIdx);
+        String[] nodes = pathPart.split("->");
+        for (int i = 0; i < nodes.length - 1; i++) {
+            String fromId = nodes[i].trim();
+            String toId = nodes[i + 1].trim();
+            Map<String, Object> rel = new LinkedHashMap<>();
+            rel.put("subjectId", fromId);
+            rel.put("resourceId", toId);
+            rel.put("relationshipType", relationshipType);
+            rel.put("createdAt", Instant.now().toString());
+            mongoTemplate.save(rel, "relationships");
+            screenCapture.captureSeedData("relationships (" + fromId + " → " + toId + " : " + relationshipType + ")", rel);
+        }
+        screenCapture.log("Saved relationship chain: " + chain);
+    }
+
+    @Given("a consistency token {string} is the latest for policy updates")
+    public void setLatestConsistencyToken(String token) {
+        this.capturedConsistencyToken = token;
+        Map<String, Object> tokenRecord = new LinkedHashMap<>();
+        tokenRecord.put("token", token);
+        tokenRecord.put("type", "policy_update");
+        tokenRecord.put("createdAt", Instant.now().toString());
+        mongoTemplate.save(tokenRecord, "consistency_tokens");
+        screenCapture.log("Set latest consistency token: " + token);
+    }
+
+    @Given("the latest consistency token is {string}")
+    public void setLatestConsistencyTokenValue(String token) {
+        this.capturedConsistencyToken = token;
+        Map<String, Object> tokenRecord = new LinkedHashMap<>();
+        tokenRecord.put("token", token);
+        tokenRecord.put("type", "policy_update");
+        tokenRecord.put("createdAt", Instant.now().toString());
+        mongoTemplate.save(tokenRecord, "consistency_tokens");
+        screenCapture.log("Set latest consistency token: " + token);
+    }
+
+    @Given("a consistency token {string} has never been issued")
+    public void tokenNeverIssued(String token) {
+        // Just record the token so it can be referenced; no record is saved to Mongo
+        this.capturedConsistencyToken = token;
+        screenCapture.log("Token never issued: " + token);
+    }
+
+    @Given("a user {string} and resource {string} have no relationship")
+    public void userAndResourceNoRelationship(String user, String resource) {
+        // Nothing to seed — absence of a relationship is the default state
+        this.requestBody.put("subject", Map.of("type", "human", "id", user));
+        this.requestBody.put("resource", Map.of("type", "order", "id", resource));
+        screenCapture.log("No relationship seeded between " + user + " and " + resource);
+    }
+
     @Given("a subject {string} with id {string}")
     public void setSubject(String type, String id) {
         this.requestBody.put("subject", Map.of("type", type, "id", id));
@@ -428,10 +525,60 @@ public class PolicyDecisionSteps {
             body.put("runtimeContext", new LinkedHashMap<>(this.runtimeContext));
         }
 
+        // Pre-condition log: check for common missing-field issues before HTTP call
+        if (body.containsKey("subject") && body.containsKey("resource") && body.containsKey("action")) {
+            String subjectId = ((Map<String, String>) body.get("subject")).get("id");
+            String resourceId = ((Map<String, String>) body.get("resource")).get("id");
+            String consistencyToken = (String) body.get("consistencyToken");
+            
+            // Log ReBAC reachability if relationships are seeded
+            long relationshipCount = mongoTemplate.count(
+                    org.springframework.data.mongodb.core.query.Query.query(
+                            new org.springframework.data.mongodb.core.query.Criteria()), "relationships");
+            if (relationshipCount > 0 && subjectId != null && resourceId != null) {
+                screenCapture.log("[Pre-Check] relationships seeded: " + relationshipCount
+                        + " | subject=" + subjectId + " resource=" + resourceId);
+            }
+            
+            // Log consistency token state 
+            if (consistencyToken != null) {
+                long tokenCount = mongoTemplate.count(
+                        org.springframework.data.mongodb.core.query.Query.query(
+                                org.springframework.data.mongodb.core.query.Criteria.where("token").is(consistencyToken)),
+                        "consistency_tokens");
+                screenCapture.log("[Pre-Check] consistency token '" + consistencyToken
+                        + "' found in store: " + (tokenCount > 0));
+            }
+        }
+
         String url = "http://localhost:" + CucumberSpringConfiguration.getPort() + "/v1/decisions/check-permission";
         HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
         this.response = restTemplate.exchange(url, HttpMethod.POST, entity, new ParameterizedTypeReference<>() {});
         captureRequestEvidence("POST", url, body, this.response);
+    }
+
+    @When("a check permission request is sent with token {string}")
+    public void sendCheckPermissionWithToken(String token) {
+        this.requestBody.put("consistencyToken", token);
+        sendCheckPermissionRequest();
+    }
+
+    @When("a check permission request with strict consistency flag And token {string} is sent")
+    public void sendCheckPermissionStrictWithToken(String token) {
+        this.requestBody.put("consistencyToken", token);
+        this.requestBody.put("strictConsistency", true);
+        sendCheckPermissionRequest();
+    }
+
+    @Then("the explanation should contain {string}")
+    public void verifyExplanationContains(String expectedText) {
+        Map<String, Object> body = this.response.getBody();
+        assertThat(body).isNotNull();
+        String explanation = (String) body.get("explanation");
+        assertThat(explanation).isNotNull();
+        assertThat(explanation).contains(expectedText);
+        screenCapture.logAssertion("Explanation contains", explanation.contains(expectedText),
+                expectedText, explanation);
     }
 
     @When("a check permission request is sent via HTTP with missing boundary")

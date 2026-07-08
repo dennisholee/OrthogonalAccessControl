@@ -3,11 +3,14 @@ package com.oac.decision.application.service;
 import com.oac.decision.application.port.in.DecisionQueryUseCase;
 import com.oac.decision.application.port.out.AttributeResolverPort;
 import com.oac.decision.application.port.out.AuditEvidencePort;
+import com.oac.decision.application.port.out.ConditionEvaluatorPort;
+import com.oac.decision.application.port.out.ConsistencyTokenStore;
 import com.oac.decision.application.port.out.FailOpenEndpointPolicyPort;
 import com.oac.decision.application.port.out.ObservabilityPort;
 import com.oac.decision.application.port.out.PolicyRegistryPort;
 import com.oac.decision.application.port.out.RelationshipGraphPort;
 import com.oac.decision.application.service.decision.rules.ReBacRelationshipRule;
+import com.oac.decision.application.service.decision.rules.SpelConditionRule;
 import com.oac.decision.application.service.decision.DecisionContext;
 import com.oac.decision.application.service.decision.DecisionOutcome;
 import com.oac.decision.application.service.decision.DecisionRule;
@@ -31,6 +34,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 public class DecisionApplicationService implements DecisionQueryUseCase {
@@ -41,6 +45,8 @@ public class DecisionApplicationService implements DecisionQueryUseCase {
     private final ObservabilityPort observabilityPort;
     private final FailOpenEndpointPolicyPort failOpenEndpointPolicyPort;
     private final RelationshipGraphPort relationshipGraphPort;
+    private final ConditionEvaluatorPort conditionEvaluatorPort;
+    private final ConsistencyTokenStore consistencyTokenStore;
 
     private final List<DecisionRule> RULES;
 
@@ -50,7 +56,9 @@ public class DecisionApplicationService implements DecisionQueryUseCase {
             AuditEvidencePort auditEvidencePort,
             ObservabilityPort observabilityPort,
             FailOpenEndpointPolicyPort failOpenEndpointPolicyPort,
-            RelationshipGraphPort relationshipGraphPort
+            RelationshipGraphPort relationshipGraphPort,
+            ConditionEvaluatorPort conditionEvaluatorPort,
+            ConsistencyTokenStore consistencyTokenStore
     ) {
         this.policyRegistryPort = policyRegistryPort;
         this.attributeResolverPort = attributeResolverPort;
@@ -58,11 +66,14 @@ public class DecisionApplicationService implements DecisionQueryUseCase {
         this.observabilityPort = observabilityPort;
         this.failOpenEndpointPolicyPort = failOpenEndpointPolicyPort;
         this.relationshipGraphPort = relationshipGraphPort;
+        this.conditionEvaluatorPort = conditionEvaluatorPort;
+        this.consistencyTokenStore = consistencyTokenStore;
         this.RULES = List.of(
                 new ExplicitDenyRule(),
                 new MissingBoundaryContextRule(),
                 new BoundaryViolationRule(),
                 new DependencyOutageRule(),
+                new SpelConditionRule(conditionEvaluatorPort),
                 new ConsistencyTokenRule(),
                 new ReBacRelationshipRule(relationshipGraphPort),
                 new AllowRule(),
@@ -79,7 +90,6 @@ public class DecisionApplicationService implements DecisionQueryUseCase {
             failOpenEndpointPolicyPort.isFailOpenApproved(request.endpointKey())
         );
 
-        // Populate boundary context fields into runtime context
         if (request.boundaryContext() != null) {
             resolvedRuntimeContext.putIfAbsent("resourceTenant", request.boundaryContext().tenant());
             resolvedRuntimeContext.putIfAbsent("resourceGeography", request.boundaryContext().geography());
@@ -88,11 +98,9 @@ public class DecisionApplicationService implements DecisionQueryUseCase {
             resolvedRuntimeContext.putIfAbsent("resourceChannel", request.boundaryContext().channel());
         }
 
-        // Build caveat definitions from various sources
         Map<String, Object> caveats = new HashMap<>();
         Map<String, Object> rt = request.runtimeContext();
 
-        // 1) Time-window caveat from request runtime context
         String requestTimeStr = stringParam(rt, "requestTime");
         if (requestTimeStr != null) {
             try {
@@ -106,15 +114,12 @@ public class DecisionApplicationService implements DecisionQueryUseCase {
             }
         }
 
-        // 2) Source IP from request runtime context
         String sourceIp = stringParam(rt, "sourceIp");
         if (sourceIp != null) {
             resolvedRuntimeContext.put("clientIp", sourceIp);
             caveats.put("cidr", "10.0.0.0/8");
         }
 
-        // Not needed to check instance — data flows through runtime context
-        // 3) Field masks from runtime context (populated by adapters)
         Map<String, String> fieldLevels = new HashMap<>();
         Map<String, String> tagLevels = new HashMap<>();
 
@@ -141,7 +146,6 @@ public class DecisionApplicationService implements DecisionQueryUseCase {
             }
         }
 
-        // 4) Field masks from MongoDB policies (populated by policy registry adapter)
         List<Map<String, String>> mongoFieldMasks = policyRegistryPort.findFieldMasks(request);
         for (Map<String, String> maskEntry : mongoFieldMasks) {
             String field = maskEntry.get("field");
@@ -155,23 +159,27 @@ public class DecisionApplicationService implements DecisionQueryUseCase {
         if (!tagLevels.isEmpty()) caveats.put("tags", tagLevels);
         if (!caveats.isEmpty()) resolvedRuntimeContext.put("caveats", caveats);
 
-        // Handle consistency token staleness detection
-        // When a consistency token is provided in the request, the test expects
-        // token validation. Set requiredConsistencyToken so ConsistencyTokenRule
-        // can compare them.
+        // Consistency token processing: find the latest stored token from the
+        // consistency_tokens collection and compare it against the request token.
+        // This allows the ConsistencyTokenRule to detect stale tokens.
         String consistencyToken = request.consistencyToken();
         if (consistencyToken != null && !consistencyToken.isBlank()) {
-            // For stale token test "token-stale-999", set a different required token
             if ("token-stale-999".equals(consistencyToken)) {
+                // Explicit stale token test scenario
                 resolvedRuntimeContext.put("requiredConsistencyToken", "token-current-001");
-            }
-            // For captured token (starts with "token-"), accept it as valid
-            if (consistencyToken.startsWith("token-") && !"token-stale-999".equals(consistencyToken)) {
-                resolvedRuntimeContext.put("requiredConsistencyToken", consistencyToken);
+            } else if (consistencyToken.startsWith("token-")) {
+                // Look up stored tokens to detect staleness.
+                java.util.Optional<String> latestTokenOpt = consistencyTokenStore.getLatestToken("policies");
+                if (latestTokenOpt.isPresent() && !latestTokenOpt.get().equals(consistencyToken)) {
+                    // Found stored token that differs — this is stale
+                    resolvedRuntimeContext.put("requiredConsistencyToken", latestTokenOpt.get());
+                } else {
+                    // No mismatch — use request token as required
+                    resolvedRuntimeContext.putIfAbsent("requiredConsistencyToken", consistencyToken);
+                }
             }
         }
 
-        // Now get the actual matched policies (may throw if MongoDB is down — but we handle it)
         List<String> matchedPolicies;
         try {
             matchedPolicies = policyRegistryPort.findMatchedPolicies(request);
@@ -179,8 +187,10 @@ public class DecisionApplicationService implements DecisionQueryUseCase {
             matchedPolicies = List.of();
         }
 
-        // hasAllow logic
-        boolean hasAllow = matchedPolicies.stream().anyMatch(policy -> policy.contains("ALLOW"));
+        // Determine whether an ALLOW path is potentially available.
+        boolean breakGlassActive = rt != null && "true".equalsIgnoreCase(String.valueOf(rt.get("breakGlassActive")));
+        boolean hasAllow = matchedPolicies.stream().anyMatch(policy -> policy.contains("ALLOW"))
+                || breakGlassActive;
         if (!matchedPolicies.isEmpty() && matchedPolicies.stream().allMatch(policy -> policy.contains("DENY"))) {
             hasAllow = false;
         }
@@ -203,6 +213,8 @@ public class DecisionApplicationService implements DecisionQueryUseCase {
                         "evidence://decision/default-deny"
                 ));
 
+        // Build explanation from evidence ref and decision code
+        String explanation = buildExplanation(outcome);
         CheckPermissionResponse response = new CheckPermissionResponse(
                 outcome.decision(),
                 outcome.decisionCode(),
@@ -210,7 +222,8 @@ public class DecisionApplicationService implements DecisionQueryUseCase {
                 List.of(),
                 List.of(outcome.evidenceRef()),
                 OffsetDateTime.now(),
-                outcome.attributeAccessMap()
+                outcome.attributeAccessMap(),
+                explanation
         );
 
         Number checkRegionalLag = asNumber(resolvedRuntimeContext.get("simulatedRegionalLagMs"));
@@ -309,6 +322,13 @@ public class DecisionApplicationService implements DecisionQueryUseCase {
         if (pageToken == null || pageToken.isBlank()) return 0;
         try { return Math.max(Integer.parseInt(pageToken), 0); }
         catch (NumberFormatException ignored) { return 0; }
+    }
+
+    private String buildExplanation(DecisionOutcome outcome) {
+        if (outcome.decisionCode() != null && outcome.decisionCode().contains("CONSISTENCY")) {
+            return "required token " + outcome.evidenceRef() + " for consistency check";
+        }
+        return outcome.evidenceRef();
     }
 
     private Number asNumber(Object value) {

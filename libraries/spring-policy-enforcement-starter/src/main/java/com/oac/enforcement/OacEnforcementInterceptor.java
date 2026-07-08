@@ -1,5 +1,8 @@
 package com.oac.enforcement;
 
+import com.oac.enforcement.resolver.SubjectResolver;
+import io.micrometer.observation.Observation;
+import io.micrometer.observation.ObservationRegistry;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
@@ -13,9 +16,12 @@ import java.util.regex.Pattern;
  * Spring HandlerInterceptor that enforces entitlements without modifying
  * generated code.
  *
+ * Integrates with Micrometer Observation for distributed tracing
+ * and structured metrics across the authorization path.
+ *
  * 1. Resolves the operationId from the request path + method using compiled patterns
  * 2. Looks up the entitlement config from the registry
- * 3. Extracts the subjectId from configurable headers
+ * 3. Extracts the subjectId via a pluggable {@link SubjectResolver} strategy
  * 4. Extracts the resourceId from path variables using the path template
  * 5. Calls the PDP to check permission
  * 6. Denies (403) if PDP returns DENY
@@ -26,28 +32,57 @@ public class OacEnforcementInterceptor implements HandlerInterceptor {
 
     private final EntitlementRegistry registry;
     private final DecisionClient decisionClient;
+    private final SubjectResolver subjectResolver;
     private final OacEntitlementProperties properties;
+    private final ObservationRegistry observationRegistry;
 
     public OacEnforcementInterceptor(EntitlementRegistry registry,
                                       DecisionClient decisionClient,
+                                      SubjectResolver subjectResolver,
                                       OacEntitlementProperties properties) {
+        this(registry, decisionClient, subjectResolver, properties, ObservationRegistry.NOOP);
+    }
+
+    public OacEnforcementInterceptor(EntitlementRegistry registry,
+                                      DecisionClient decisionClient,
+                                      SubjectResolver subjectResolver,
+                                      OacEntitlementProperties properties,
+                                      ObservationRegistry observationRegistry) {
         this.registry = registry;
         this.decisionClient = decisionClient;
+        this.subjectResolver = subjectResolver;
         this.properties = properties;
+        this.observationRegistry = observationRegistry != null ? observationRegistry : ObservationRegistry.NOOP;
     }
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response,
                              Object handler) throws Exception {
 
-        String path = request.getRequestURI();
+        String rawPath = request.getRequestURI();
         // Strip context path if present
         String contextPath = request.getContextPath();
         if (contextPath != null && !contextPath.isEmpty()) {
-            path = path.substring(contextPath.length());
+            rawPath = rawPath.substring(contextPath.length());
         }
 
-        String method = request.getMethod();
+        final String path = rawPath;
+        final String method = request.getMethod();
+
+        return Observation.createNotStarted("oac.checkPermission", observationRegistry)
+                .contextualName("oac.authorization.check")
+                .lowCardinalityKeyValue("oac.http.method", method)
+                .observe(() -> {
+                    try {
+                        return enforce(path, method, request, response);
+                    } catch (Exception e) {
+                        throw new RuntimeException("OAC enforcement failed", e);
+                    }
+                });
+    }
+
+    private boolean enforce(String path, String method,
+                            HttpServletRequest request, HttpServletResponse response) throws Exception {
         String operationId = registry.resolveOperationId(method, path);
 
         if (operationId == null) {
@@ -59,7 +94,7 @@ public class OacEnforcementInterceptor implements HandlerInterceptor {
             return true; // Not protected — allow through
         }
 
-        String subjectId = resolveSubjectId(request, config);
+        String subjectId = subjectResolver.resolve(request, config);
         if (subjectId == null || subjectId.isBlank()) {
             send403(response, "Missing identity header for protected endpoint");
             return false;
@@ -78,17 +113,6 @@ public class OacEnforcementInterceptor implements HandlerInterceptor {
 
         log.debug("OAC ALLOWED: {} {} {}", subjectId, config.action(), fullResourceId);
         return true;
-    }
-
-    private String resolveSubjectId(HttpServletRequest request, OacEntitlementConfig config) {
-        // Per-operation override takes precedence
-        if (config.subjectIdHeader() != null) {
-            return request.getHeader(config.subjectIdHeader());
-        }
-        // Default: check user header, then service header
-        String userId = request.getHeader(properties.getIdentity().getUserHeader());
-        if (userId != null) return userId;
-        return request.getHeader(properties.getIdentity().getServiceHeader());
     }
 
     /**

@@ -5,22 +5,25 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.MethodParameter;
 import org.springframework.http.MediaType;
+import org.springframework.http.ProblemDetail;
 import org.springframework.http.server.ServerHttpRequest;
 import org.springframework.http.server.ServerHttpResponse;
 import org.springframework.web.bind.annotation.ControllerAdvice;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyAdvice;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
- * ResponseBodyAdvice that applies field-level masks to API responses
- * based on the PDP's AttributeAccessMap.
+ * ResponseBodyAdvice that applies field-level masks to API responses.
+ *
+ * Uses Java 21 pattern matching for instance-of checks and
+ * configurable sensitive field patterns.
  *
  * This is completely non-intrusive — no generated code is modified.
  * The advice intercepts all responses and applies masks to fields
- * classified as PII, PCI, or CONFIDENTIAL based on the resource's
- * attribute schema.
+ * classified as PII, PCI, or CONFIDENTIAL patterns.
  */
 @ControllerAdvice
 public class FieldMaskResponseAdvice implements ResponseBodyAdvice<Object> {
@@ -50,47 +53,45 @@ public class FieldMaskResponseAdvice implements ResponseBodyAdvice<Object> {
 
         if (body == null) return null;
 
-        // Convert the response body to a map for generic field masking
-        Map<String, Object> data;
-        if (body instanceof Map) {
-            data = (Map<String, Object>) body;
-        } else {
-            try {
-                data = objectMapper.convertValue(body, Map.class);
-            } catch (Exception e) {
-                log.debug("Cannot convert response body to map for field masking: {}", e.getMessage());
-                return body;
-            }
+        // Skip ProblemDetail responses (RFC 9457) — these are already structured errors
+        if (body instanceof ProblemDetail) {
+            return body;
         }
 
-        String userId = request.getHeaders().getFirst("X-User-Id");
-        if (userId == null || userId.equals("admin")) return body;
+        Map<String, Object> data = switch (body) {
+            case Map<?, ?> map -> (Map<String, Object>) map;
+            default -> {
+                try {
+                    yield objectMapper.convertValue(body, Map.class);
+                } catch (Exception e) {
+                    log.debug("Cannot convert response body to map for field masking: {}", e.getMessage());
+                    yield null;
+                }
+            }
+        };
+        if (data == null) return body;
 
-        Map<String, Object> masked = applyMasks(data, userId);
-        return masked;
+        String userId = request.getHeaders().getFirst("X-User-Id");
+        // Admin sees all fields unmasked
+        if (userId == null || "admin".equals(userId)) {
+            return body;
+        }
+
+        return applyMasks(data, userId);
     }
 
     private Map<String, Object> applyMasks(Map<String, Object> data, String userId) {
-        Map<String, Object> masked = new java.util.LinkedHashMap<>();
+        Map<String, Object> masked = new LinkedHashMap<>();
         for (Map.Entry<String, Object> entry : data.entrySet()) {
             String field = entry.getKey();
             Object value = entry.getValue();
 
-            if (value instanceof Map) {
-                // Recurse into nested objects
-                masked.put(field, applyMasks((Map<String, Object>) value, userId));
-            } else if (value instanceof List) {
-                // Recurse into lists of maps
-                List<?> list = (List<?>) value;
-                List<Object> maskedList = new java.util.ArrayList<>(list.size());
-                for (Object item : list) {
-                    if (item instanceof Map) {
-                        maskedList.add(applyMasks((Map<String, Object>) item, userId));
-                    } else {
-                        maskedList.add(item);
-                    }
-                }
-                masked.put(field, maskedList);
+            if (value == null) {
+                masked.put(field, null);
+            } else if (value instanceof Map<?, ?> nested) {
+                masked.put(field, applyMasks((Map<String, Object>) nested, userId));
+            } else if (value instanceof List<?> list) {
+                masked.put(field, maskList(list, userId));
             } else if (isSensitiveField(field)) {
                 masked.put(field, maskValue(field, value));
             } else {
@@ -98,6 +99,17 @@ public class FieldMaskResponseAdvice implements ResponseBodyAdvice<Object> {
             }
         }
         return masked;
+    }
+
+    private List<Object> maskList(List<?> list, String userId) {
+        return list.stream()
+                .map(item -> {
+                    if (item instanceof Map<?, ?> map) {
+                        return applyMasks((Map<String, Object>) map, userId);
+                    }
+                    return item;
+                })
+                .toList();
     }
 
     private boolean isSensitiveField(String field) {

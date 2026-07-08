@@ -1,1 +1,2 @@
 com.oac.enforcement.EnforcementAutoConfiguration
+com.oac.enforcement.OacCachingAutoConfiguration

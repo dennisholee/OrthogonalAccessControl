@@ -9,8 +9,8 @@ import static io.cucumber.junit.platform.engine.Constants.GLUE_PROPERTY_NAME;
 import static io.cucumber.junit.platform.engine.Constants.PLUGIN_PROPERTY_NAME;
 
 /**
- * Cucumber JUnit Platform Suite runner for the order-service.feature scenarios.
- * Named *Test.java so it runs during mvn test (surefire) as a gate-level E2E test.
+ * Cucumber JUnit Platform Suite runner for all BDD feature scenarios.
+ * Scans all feature files in the features directory.
  */
 @Suite
 @IncludeEngines("cucumber")

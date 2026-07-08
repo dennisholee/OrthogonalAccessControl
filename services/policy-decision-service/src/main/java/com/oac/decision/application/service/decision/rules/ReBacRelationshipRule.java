@@ -9,17 +9,6 @@ import java.util.Optional;
 
 /**
  * Decision rule for ReBAC (Relationship-Based Access Control).
- * Evaluates whether the subject has an active relationship to the target resource
- * via the relationship graph, with bounded BFS traversal up to the configured max depth.
- *
- * This rule sits between BoundaryViolation and Allow in the precedence chain:
- * relationships are evaluated after structural boundary checks but before
- * blanket ALLOW rules.
- *
- * When a relationship IS found, this rule returns empty (pass-through) so that
- * the AllowRule downstream can evaluate caveats and produce the final ALLOW
- * decision with field-level access constraints. When NO relationship exists,
- * this rule returns an explicit DENY to short-circuit the chain.
  */
 public class ReBacRelationshipRule implements DecisionRule {
 
@@ -31,8 +20,6 @@ public class ReBacRelationshipRule implements DecisionRule {
 
     @Override
     public Optional<DecisionOutcome> evaluate(DecisionContext context) {
-        // Only evaluate if there are ReBAC-style policies matched.
-        // Skip FIELD policies so field-level scenarios aren't blocked.
         boolean hasReBACPolicy = context.matchedPolicies().stream()
                 .anyMatch(policy -> (policy.contains("REBAC") || policy.contains("RELATIONSHIP"))
                         && !policy.contains("FIELD"));
@@ -44,9 +31,28 @@ public class ReBacRelationshipRule implements DecisionRule {
         var request = context.request();
         String subjectId = request.subject().id();
         String resourceId = request.resource().id();
-        String resourceType = request.resource().type();
 
-        // Check if a relationship exists (direct or inherited via BFS up to maxDepth)
+        // Extract relationship type from matched policies. If found, use it to
+        // filter the direct edge check from traversed nodes to the target resource.
+        String relationshipType = null;
+        for (String policy : context.matchedPolicies()) {
+            if (!policy.contains("REBAC") && !policy.contains("RELATIONSHIP")) continue;
+            int idx = policy.lastIndexOf(":REBAC.");
+            if (idx == -1) idx = policy.lastIndexOf(":RELATIONSHIP.");
+            if (idx >= 0) {
+                String suffix = policy.substring(idx + (policy.charAt(idx + 1) == 'R' ? 7 : 13));
+                int nc = suffix.indexOf(':');
+                if (nc > 0) suffix = suffix.substring(0, nc);
+                String extracted = suffix.trim();
+                if (!extracted.isEmpty()) {
+                    relationshipType = extracted;
+                    break;
+                }
+            }
+        }
+
+        // Use null for type to traverse through intermediate hops of any type.
+        // Then verify the final edge type matches if required.
         boolean hasRelationship = relationshipGraphPort.hasRelationship(
                 subjectId, resourceId, null,
                 relationshipGraphPort.getMaxTraversalDepth()
@@ -60,7 +66,23 @@ public class ReBacRelationshipRule implements DecisionRule {
             ));
         }
 
-        // Relationship found — pass through to AllowRule for caveat evaluation
+        // If a specific type is required, do a second check with the type.
+        // This ensures that when policy requires "manages", an "approver"
+        // relationship alone doesn't grant access.
+        if (relationshipType != null) {
+            hasRelationship = relationshipGraphPort.hasRelationship(
+                    subjectId, resourceId, relationshipType,
+                    relationshipGraphPort.getMaxTraversalDepth()
+            );
+            if (!hasRelationship) {
+                return Optional.of(new DecisionOutcome(
+                        "DENY",
+                        "DECISION_REBAC_NO_RELATIONSHIP",
+                        "evidence://decision/rebac/no-relationship-type"
+                ));
+            }
+        }
+
         return Optional.empty();
     }
 }

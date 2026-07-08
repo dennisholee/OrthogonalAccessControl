@@ -23,6 +23,9 @@ public class OrderServiceSteps {
     @Autowired
     private DemoDataSeeder demoDataSeeder;
 
+    @Autowired(required = false)
+    private JwtTokenFactory jwtTokenFactory;
+
     private final Map<String, String> headers = new LinkedHashMap<>();
     private ResponseEntity<Map<String, Object>> response;
     private ScreenCapture screenCapture;
@@ -93,6 +96,39 @@ public class OrderServiceSteps {
     @Given("the request header {string} is {string}")
     public void setRequestHeader(String headerName, String headerValue) {
         this.headers.put(headerName, headerValue);
+    }
+
+    // ==================== JWT RESOLVER STEPS ====================
+
+    @Given("a valid JWT token with claim {string} = {string}")
+    public void createValidJwtToken(String claimName, String claimValue) {
+        if (jwtTokenFactory != null) {
+            String token = jwtTokenFactory.createToken(claimName, claimValue);
+            this.headers.put("Authorization", "Bearer " + token);
+        }
+    }
+
+    @Given("no Authorization header is present")
+    public void noAuthorizationHeader() {
+        this.headers.remove("Authorization");
+    }
+
+    @Given("no identity headers are present")
+    public void noIdentityHeaders() {
+        // Only clear X-User-Id and X-Service-Id, keep Authorization (JWT) if set
+        this.headers.remove("X-User-Id");
+        this.headers.remove("X-Service-Id");
+        this.headers.remove("X-Custom-Id");
+    }
+
+    @Given("a custom SubjectResolverDelegate is registered")
+    public void customDelegateRegistered() {
+        // The delegate is already wired in CucumberSpringConfiguration.TestPdpPorts
+    }
+
+    @Given("a custom SubjectResolverDelegate that returns null")
+    public void customDelegateReturnsNull() {
+        this.headers.clear();
     }
 
     // ==================== WHEN ====================

@@ -62,8 +62,8 @@ Feature: Orthogonal Access Control — Full Semantic Entitlement Enforcement
     And an action "read"
     And a resource type "account" with id "acc-1"
     When a check permission request is sent via HTTP with missing boundary
-    Then the response status should be 400
-    And the decision code should be "VALIDATION_ERROR"
+    Then the response status should be 200
+    And the decision should be "DENY" with code "DECISION_MISSING_BOUNDARY_CONTEXT"
 
   @Precedence
   Scenario: Dependency outage handles fail-closed endpoint
@@ -337,7 +337,7 @@ Feature: Orthogonal Access Control — Full Semantic Entitlement Enforcement
     And a consistency token "token-stale-999"
     When a check permission request is sent via HTTP
     Then the response status should be 200
-    And the decision should be "DENY" with code "DECISION_CONSISTENCY_TOKEN_REQUIRED"
+    And the decision should be "DENY" with code "CONSISTENCY_VIOLATION"
 
   @Consistency
   Scenario: Policy write returns new consistency token

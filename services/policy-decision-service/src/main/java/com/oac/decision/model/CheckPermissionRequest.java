@@ -10,7 +10,7 @@ public record CheckPermissionRequest(
         @Valid @NotNull SubjectRef subject,
         @NotBlank String action,
         @Valid @NotNull ResourceRef resource,
-        @Valid @NotNull BoundaryContext boundaryContext,
+        @Valid BoundaryContext boundaryContext,
         Map<String, Object> runtimeContext,
         String consistencyToken,
         String requestId,
