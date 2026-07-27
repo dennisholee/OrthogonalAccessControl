@@ -1,0 +1,52 @@
+[
+  {
+    "subjectId": "bob",
+    "subjectType": "human",
+    "relationshipType": "manages",
+    "resourceId": "ORD-001",
+    "resourceType": "order"
+  },
+  {
+    "subjectId": "alice",
+    "subjectType": "human",
+    "relationshipType": "owner",
+    "resourceId": "ORD-005",
+    "resourceType": "order"
+  },
+  {
+    "subjectId": "alice",
+    "subjectType": "human",
+    "relationshipType": "approver",
+    "resourceId": "ORD-002",
+    "resourceType": "order"
+  },
+  {
+    "subjectId": "carol",
+    "subjectType": "human",
+    "relationshipType": "manages",
+    "resourceId": "dept-eng",
+    "resourceType": "department"
+  },
+  {
+    "subjectId": "dept-eng",
+    "subjectType": "department",
+    "relationshipType": "parent",
+    "resourceId": "div-product",
+    "resourceType": "division"
+  },
+  {
+    "subjectId": "div-product",
+    "subjectType": "division",
+    "relationshipType": "owner",
+    "resourceId": "ORD-003",
+    "resourceType": "order"
+  },
+  {
+    "subjectId": "dave",
+    "subjectType": "human",
+    "relationshipType": "owner",
+    "resourceId": "ORD-004",
+    "resourceType": "order",
+    "expiresAt": "2024-01-01T00:00:00Z"
+  }
+]

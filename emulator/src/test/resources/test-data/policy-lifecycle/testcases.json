@@ -1,0 +1,50 @@
+[
+  {
+    "name": "User with ACTIVE policy allowed",
+    "request": {
+      "subject": { "type": "human", "id": "active-user" },
+      "action": "read",
+      "resource": { "type": "account", "id": "acc-1" },
+      "boundaryContext": {
+        "tenant": "tenant-a", "geography": "us", "market": "retail", "lineOfBusiness": "cards", "channel": "staff"
+      }
+    },
+    "expected": "ALLOW"
+  },
+  {
+    "name": "User with DRAFT policy denied (DRAFT not evaluated)",
+    "request": {
+      "subject": { "type": "human", "id": "draft-user" },
+      "action": "read",
+      "resource": { "type": "account", "id": "acc-1" },
+      "boundaryContext": {
+        "tenant": "tenant-a", "geography": "us", "market": "retail", "lineOfBusiness": "cards", "channel": "staff"
+      }
+    },
+    "expected": "DENY"
+  },
+  {
+    "name": "User with DEPRECATED policy denied (emulator only evaluates ACTIVE)",
+    "request": {
+      "subject": { "type": "human", "id": "deprecated-user" },
+      "action": "read",
+      "resource": { "type": "account", "id": "acc-1" },
+      "boundaryContext": {
+        "tenant": "tenant-a", "geography": "us", "market": "retail", "lineOfBusiness": "cards", "channel": "staff"
+      }
+    },
+    "expected": "DENY"
+  },
+  {
+    "name": "User with RETIRED policy denied (RETIRED not evaluated)",
+    "request": {
+      "subject": { "type": "human", "id": "retired-user" },
+      "action": "read",
+      "resource": { "type": "account", "id": "acc-1" },
+      "boundaryContext": {
+        "tenant": "tenant-a", "geography": "us", "market": "retail", "lineOfBusiness": "cards", "channel": "staff"
+      }
+    },
+    "expected": "DENY"
+  }
+]

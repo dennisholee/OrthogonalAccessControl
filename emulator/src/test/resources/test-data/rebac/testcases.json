@@ -1,0 +1,74 @@
+[
+  {
+    "name": "Bob with direct manages edge approves ORD-001",
+    "request": {
+      "subject": { "type": "human", "id": "bob" },
+      "action": "approve",
+      "resource": { "type": "order", "id": "ORD-001" },
+      "boundaryContext": {
+        "tenant": "acme", "geography": "EU", "market": "enterprise", "lineOfBusiness": "supply-chain", "channel": "staff"
+      }
+    },
+    "expected": "ALLOW"
+  },
+  {
+    "name": "Alice with owner relationship cannot approve (manages required)",
+    "request": {
+      "subject": { "type": "human", "id": "alice" },
+      "action": "approve",
+      "resource": { "type": "order", "id": "ORD-001" },
+      "boundaryContext": {
+        "tenant": "acme", "geography": "EU", "market": "enterprise", "lineOfBusiness": "supply-chain", "channel": "staff"
+      }
+    },
+    "expected": "DENY"
+  },
+  {
+    "name": "Alice with direct owner edge reads ORD-005",
+    "request": {
+      "subject": { "type": "human", "id": "alice" },
+      "action": "read",
+      "resource": { "type": "order", "id": "ORD-005" },
+      "boundaryContext": {
+        "tenant": "acme", "geography": "EU", "market": "enterprise", "lineOfBusiness": "supply-chain", "channel": "staff"
+      }
+    },
+    "expected": "ALLOW"
+  },
+  {
+    "name": "Carol 3-hop chain to ORD-003 reads via ReBAC",
+    "request": {
+      "subject": { "type": "human", "id": "carol" },
+      "action": "read",
+      "resource": { "type": "order", "id": "ORD-003" },
+      "boundaryContext": {
+        "tenant": "acme", "geography": "EU", "market": "enterprise", "lineOfBusiness": "supply-chain", "channel": "staff"
+      }
+    },
+    "expected": "ALLOW"
+  },
+  {
+    "name": "Dave with expired owner edge is denied read",
+    "request": {
+      "subject": { "type": "human", "id": "dave" },
+      "action": "read",
+      "resource": { "type": "order", "id": "ORD-004" },
+      "boundaryContext": {
+        "tenant": "acme", "geography": "EU", "market": "enterprise", "lineOfBusiness": "supply-chain", "channel": "staff"
+      }
+    },
+    "expected": "DENY"
+  },
+  {
+    "name": "Unknown user without any relationship denied approve",
+    "request": {
+      "subject": { "type": "human", "id": "unknown-user" },
+      "action": "approve",
+      "resource": { "type": "order", "id": "ORD-001" },
+      "boundaryContext": {
+        "tenant": "acme", "geography": "EU", "market": "enterprise", "lineOfBusiness": "supply-chain", "channel": "staff"
+      }
+    },
+    "expected": "DENY"
+  }
+]

@@ -1,0 +1,38 @@
+[
+  {
+    "name": "POL.LIFECYCLE.DRAFT.v1",
+    "state": "DRAFT",
+    "effect": "ALLOW",
+    "action": "read",
+    "resourceType": "account",
+    "subjectId": "draft-user",
+    "subjectType": "human"
+  },
+  {
+    "name": "POL.LIFECYCLE.ACTIVE.v1",
+    "state": "ACTIVE",
+    "effect": "ALLOW",
+    "action": "read",
+    "resourceType": "account",
+    "subjectId": "active-user",
+    "subjectType": "human"
+  },
+  {
+    "name": "POL.LIFECYCLE.DEPRECATED.v1",
+    "state": "DEPRECATED",
+    "effect": "ALLOW",
+    "action": "read",
+    "resourceType": "account",
+    "subjectId": "deprecated-user",
+    "subjectType": "human"
+  },
+  {
+    "name": "POL.LIFECYCLE.RETIRED.v1",
+    "state": "RETIRED",
+    "effect": "ALLOW",
+    "action": "read",
+    "resourceType": "account",
+    "subjectId": "retired-user",
+    "subjectType": "human"
+  }
+]

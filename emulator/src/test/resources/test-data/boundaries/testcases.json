@@ -1,0 +1,86 @@
+[
+  {
+    "name": "Correct boundary match allows",
+    "request": {
+      "subject": { "type": "human", "id": "user-range" },
+      "action": "read",
+      "resource": { "type": "order", "id": "ORD-1" },
+      "boundaryContext": {
+        "tenant": "tenant-a", "geography": "us", "market": "retail", "lineOfBusiness": "cards", "channel": "staff"
+      }
+    },
+    "expected": "ALLOW"
+  },
+  {
+    "name": "Cross-tenant boundary violation denies",
+    "request": {
+      "subject": { "type": "human", "id": "user-range" },
+      "action": "read",
+      "resource": { "type": "order", "id": "ORD-2" },
+      "boundaryContext": {
+        "tenant": "tenant-b", "geography": "us", "market": "retail", "lineOfBusiness": "cards", "channel": "staff"
+      }
+    },
+    "expected": "DENY"
+  },
+  {
+    "name": "Cross-geography boundary violation denies",
+    "request": {
+      "subject": { "type": "human", "id": "user-range" },
+      "action": "read",
+      "resource": { "type": "order", "id": "ORD-3" },
+      "boundaryContext": {
+        "tenant": "tenant-a", "geography": "EU", "market": "retail", "lineOfBusiness": "cards", "channel": "staff"
+      }
+    },
+    "expected": "DENY"
+  },
+  {
+    "name": "Cross-market boundary violation denies",
+    "request": {
+      "subject": { "type": "human", "id": "user-range" },
+      "action": "read",
+      "resource": { "type": "order", "id": "ORD-4" },
+      "boundaryContext": {
+        "tenant": "tenant-a", "geography": "us", "market": "enterprise", "lineOfBusiness": "cards", "channel": "staff"
+      }
+    },
+    "expected": "DENY"
+  },
+  {
+    "name": "Cross-LOB boundary violation denies",
+    "request": {
+      "subject": { "type": "human", "id": "user-range" },
+      "action": "read",
+      "resource": { "type": "order", "id": "ORD-5" },
+      "boundaryContext": {
+        "tenant": "tenant-a", "geography": "us", "market": "retail", "lineOfBusiness": "supply-chain", "channel": "staff"
+      }
+    },
+    "expected": "DENY"
+  },
+  {
+    "name": "Cross-channel boundary violation denies",
+    "request": {
+      "subject": { "type": "human", "id": "user-range" },
+      "action": "read",
+      "resource": { "type": "order", "id": "ORD-6" },
+      "boundaryContext": {
+        "tenant": "tenant-a", "geography": "us", "market": "retail", "lineOfBusiness": "cards", "channel": "customer"
+      }
+    },
+    "expected": "DENY"
+  },
+  {
+    "name": "Multiple boundary fields mismatch denies",
+    "request": {
+      "subject": { "type": "human", "id": "user-range" },
+      "action": "read",
+      "resource": { "type": "order", "id": "ORD-7" },
+      "boundaryContext": {
+        "tenant": "tenant-x", "geography": "EU", "market": "enterprise", "lineOfBusiness": "supply-chain", "channel": "customer"
+      }
+    },
+    "expected": "DENY"
+  }
+]

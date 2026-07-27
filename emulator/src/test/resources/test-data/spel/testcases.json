@@ -1,0 +1,93 @@
+[
+  {
+    "name": "Auditor in compliance department reads order",
+    "request": {
+      "subject": { "type": "human", "id": "auditor-alice" },
+      "action": "read",
+      "resource": { "type": "order", "id": "ORD-001" },
+      "runtimeContext": { "subjectDepartment": "compliance" },
+      "boundaryContext": {
+        "tenant": "acme", "geography": "EU", "market": "enterprise", "lineOfBusiness": "retail", "channel": "staff"
+      }
+    },
+    "expected": "ALLOW"
+  },
+  {
+    "name": "Engineer in non-compliance department denied read",
+    "request": {
+      "subject": { "type": "human", "id": "bob-engineer" },
+      "action": "read",
+      "resource": { "type": "order", "id": "ORD-002" },
+      "runtimeContext": { "subjectDepartment": "engineering" },
+      "boundaryContext": {
+        "tenant": "acme", "geography": "EU", "market": "enterprise", "lineOfBusiness": "retail", "channel": "staff"
+      }
+    },
+    "expected": "DENY"
+  },
+  {
+    "name": "Alice approves for bob (SoD passes: alice != bob)",
+    "request": {
+      "subject": { "type": "human", "id": "alice" },
+      "action": "approve",
+      "resource": { "type": "transaction", "id": "TXN-001" },
+      "runtimeContext": { "requesterId": "bob" },
+      "boundaryContext": {
+        "tenant": "acme", "geography": "EU", "market": "enterprise", "lineOfBusiness": "retail", "channel": "staff"
+      }
+    },
+    "expected": "ALLOW"
+  },
+  {
+    "name": "Alice cannot self-approve (SoD fails: alice == alice)",
+    "request": {
+      "subject": { "type": "human", "id": "alice" },
+      "action": "approve",
+      "resource": { "type": "transaction", "id": "TXN-002" },
+      "runtimeContext": { "requesterId": "alice" },
+      "boundaryContext": {
+        "tenant": "acme", "geography": "EU", "market": "enterprise", "lineOfBusiness": "retail", "channel": "staff"
+      }
+    },
+    "expected": "DENY"
+  },
+  {
+    "name": "High-risk trade denied (riskScore 85 >= 70)",
+    "request": {
+      "subject": { "type": "human", "id": "trader" },
+      "action": "execute_trade",
+      "resource": { "type": "order", "id": "ORD-HIGH" },
+      "runtimeContext": { "riskScore": "85" },
+      "boundaryContext": {
+        "tenant": "acme", "geography": "EU", "market": "enterprise", "lineOfBusiness": "retail", "channel": "staff"
+      }
+    },
+    "expected": "DENY"
+  },
+  {
+    "name": "Low-risk trade allowed (riskScore 50 < 70)",
+    "request": {
+      "subject": { "type": "human", "id": "trader" },
+      "action": "execute_trade",
+      "resource": { "type": "order", "id": "ORD-LOW" },
+      "runtimeContext": { "riskScore": "50" },
+      "boundaryContext": {
+        "tenant": "acme", "geography": "EU", "market": "enterprise", "lineOfBusiness": "retail", "channel": "staff"
+      }
+    },
+    "expected": "ALLOW"
+  },
+  {
+    "name": "Document read allowed during business hours (hour 14)",
+    "request": {
+      "subject": { "type": "human", "id": "clerk" },
+      "action": "read",
+      "resource": { "type": "document", "id": "DOC-001" },
+      "runtimeContext": { "currentHour": "14" },
+      "boundaryContext": {
+        "tenant": "acme", "geography": "EU", "market": "enterprise", "lineOfBusiness": "retail", "channel": "staff"
+      }
+    },
+    "expected": "ALLOW"
+  }
+]

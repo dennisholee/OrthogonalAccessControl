@@ -1,0 +1,28 @@
+[
+  {
+    "name": "POL.STAFF.ACCOUNT.READ.v1",
+    "state": "ACTIVE",
+    "effect": "ALLOW",
+    "action": "read",
+    "resourceType": "account",
+    "subjectType": "human",
+    "tenant": "tenant-a",
+    "geography": "us",
+    "market": "retail",
+    "lineOfBusiness": "cards",
+    "channel": "staff"
+  },
+  {
+    "name": "POL.CUSTOMER.ACCOUNT.READ.v1",
+    "state": "ACTIVE",
+    "effect": "ALLOW",
+    "action": "read",
+    "resourceType": "account",
+    "subjectType": "human",
+    "tenant": "tenant-a",
+    "geography": "us",
+    "market": "retail",
+    "lineOfBusiness": "cards",
+    "channel": "customer"
+  }
+]

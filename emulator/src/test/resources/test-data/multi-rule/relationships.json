@@ -1,0 +1,16 @@
+[
+  {
+    "subjectId": "auditor-compliant",
+    "subjectType": "human",
+    "relationshipType": "manages",
+    "resourceId": "ORD-001",
+    "resourceType": "order"
+  },
+  {
+    "subjectId": "staff-reader",
+    "subjectType": "human",
+    "relationshipType": "manages",
+    "resourceId": "ORD-002",
+    "resourceType": "order"
+  }
+]

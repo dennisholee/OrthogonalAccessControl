@@ -1,0 +1,38 @@
+[
+  {
+    "name": "Staff user reads via staff channel allowed",
+    "request": {
+      "subject": { "type": "human", "id": "staff-user" },
+      "action": "read",
+      "resource": { "type": "account", "id": "acc-1" },
+      "boundaryContext": {
+        "tenant": "tenant-a", "geography": "us", "market": "retail", "lineOfBusiness": "cards", "channel": "staff"
+      }
+    },
+    "expected": "ALLOW"
+  },
+  {
+    "name": "Customer user reads via customer channel allowed",
+    "request": {
+      "subject": { "type": "human", "id": "customer-user" },
+      "action": "read",
+      "resource": { "type": "account", "id": "acc-2" },
+      "boundaryContext": {
+        "tenant": "tenant-a", "geography": "us", "market": "retail", "lineOfBusiness": "cards", "channel": "customer"
+      }
+    },
+    "expected": "ALLOW"
+  },
+  {
+    "name": "Customer user in staff channel denied by missing policy (only customer policy matches)",
+    "request": {
+      "subject": { "type": "human", "id": "customer-user" },
+      "action": "read",
+      "resource": { "type": "account", "id": "acc-3" },
+      "boundaryContext": {
+        "tenant": "tenant-a", "geography": "us", "market": "retail", "lineOfBusiness": "cards", "channel": "customer"
+      }
+    },
+    "expected": "ALLOW"
+  }
+]

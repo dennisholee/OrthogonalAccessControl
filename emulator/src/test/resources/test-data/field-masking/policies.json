@@ -1,0 +1,35 @@
+[
+  {
+    "name": "POL.FIELDMASK.CSR.READ.v1",
+    "state": "ACTIVE",
+    "effect": "ALLOW",
+    "action": "read",
+    "resourceType": "order",
+    "fieldMasks": [
+      {"field": "customer.email", "level": "MASK"},
+      {"field": "customer.ssn", "level": "NONE"}
+    ]
+  },
+  {
+    "name": "POL.FIELDMASK.ADMIN.READ.v1",
+    "state": "ACTIVE",
+    "effect": "ALLOW",
+    "action": "read",
+    "resourceType": "order",
+    "fieldMasks": [
+      {"field": "customer.email", "level": "READ"},
+      {"field": "customer.ssn", "level": "READ"}
+    ]
+  },
+  {
+    "name": "POL.FIELDMASK.WORKLOAD.READ.v1",
+    "state": "ACTIVE",
+    "effect": "ALLOW",
+    "action": "read_aggregate",
+    "resourceType": "order",
+    "fieldMasks": [
+      {"field": "customer.*", "level": "NONE"},
+      {"field": "order.*", "level": "READ"}
+    ]
+  }
+]

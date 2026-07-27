@@ -1,0 +1,40 @@
+[
+  {
+    "name": "Emergency user with break-glass active can read",
+    "request": {
+      "subject": { "type": "human", "id": "emergency-user" },
+      "action": "read",
+      "resource": { "type": "account", "id": "acc-1" },
+      "runtimeContext": { "breakGlassActive": "true" },
+      "boundaryContext": {
+        "tenant": "tenant-a", "geography": "us", "market": "retail", "lineOfBusiness": "cards", "channel": "staff"
+      }
+    },
+    "expected": "ALLOW"
+  },
+  {
+    "name": "Emergency user without break-glass follows normal rules (denied - no matching allow)",
+    "request": {
+      "subject": { "type": "human", "id": "emergency-user" },
+      "action": "delete",
+      "resource": { "type": "account", "id": "acc-1" },
+      "boundaryContext": {
+        "tenant": "tenant-a", "geography": "us", "market": "retail", "lineOfBusiness": "cards", "channel": "staff"
+      }
+    },
+    "expected": "DENY"
+  },
+  {
+    "name": "Blocked user denied even with break-glass active (explicit deny wins)",
+    "request": {
+      "subject": { "type": "human", "id": "blocked-user" },
+      "action": "read",
+      "resource": { "type": "account", "id": "acc-1" },
+      "runtimeContext": { "breakGlassActive": "true" },
+      "boundaryContext": {
+        "tenant": "tenant-a", "geography": "us", "market": "retail", "lineOfBusiness": "cards", "channel": "staff"
+      }
+    },
+    "expected": "DENY"
+  }
+]

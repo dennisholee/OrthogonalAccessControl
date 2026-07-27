@@ -35,10 +35,46 @@ For policy/admin workflows, include tests for:
 
 ## Test Types and Expectations
 
-- Unit tests: precedence logic, condition evaluation, and edge cases.
-- Integration tests: enforcement library to decision service to graph/attribute dependencies.
-- Contract tests: decision and admin API request/response compatibility.
-- Resilience tests: timeout, dependency failure, stale-cache, and regional failover scenarios.
+### E2E Feature Tests (Gate Required)
+- **Definition**: HTTP-driven, real dependencies (Testcontainers MongoDB), front-to-back verification.
+- **Framework**: Cucumber (BDD) scenarios in `policy-decision.feature`.
+- **Coverage**: All mandatory behavior areas (precedence, boundaries, ReBAC, caveats, field access, consistency tokens, admin lifecycle, lookup resources, governance).
+- **Execution**: Runs during every `mvn test` via `maven-surefire-plugin` as part of the `**/*Test.java` suite. A failure blocks the build.
+- **Evidence**: Each scenario produces screen-capture artifacts in `target/screen-capture/{feature}/{scenario}/` containing:
+  - `00-seed-data.json` — MongoDB documents seeded before the test
+  - `01-request.json` — HTTP request payload + headers
+  - `02-response.json` — HTTP response status + body
+  - `03-post-state.json` — MongoDB state after the test
+  - `04-verification-log.txt` — assertion results
+
+### Integration Tests (Supplemental)
+- **Definition**: Full Spring Boot context, Testcontainers MongoDB, direct bean calls or TestRestTemplate.
+- **Framework**: JUnit 5 with `*IT.java` suffix.
+- **Execution**: Runs via `maven-failsafe-plugin` during `mvn verify`. Does not block `mvn test`.
+- **Coverage**: Deeper isolated flows (ReBAC traversal depth, MongoDB query generation, policy conflict detection).
+
+### Unit Tests (Minimal)
+- Architecture rule tests only (e.g., PortsAndAdaptersArchitectureTest).
+- No mock-based ControllerTest or ServiceTest classes. All API-layer tests must be Cucumber BDD E2E scenarios.
+- Pure logic tests (e.g., precedence ordering, condition evaluation) are acceptable if they cannot be expressed as Cucumber scenarios.
+
+### Contract Tests
+- Decision and admin API request/response compatibility, validated against OpenAPI specs.
+- Future: generated from `contracts/decision-api.yaml` and `contracts/admin-api.yaml`.
+
+### Resilience Tests
+- Timeout, dependency failure, stale-cache, and regional failover scenarios.
+- Future: chaos-engineering style, not yet required for Phase 1.
+
+## Test Structure Rules
+
+1. **No `@WebMvcTest` or mock-based controller tests.** All HTTP-level verification must go through Cucumber BDD with real Testcontainers dependencies.
+2. **Every new API endpoint requires at least one Cucumber scenario** that:
+   - Seeds dependencies via MongoDB
+   - Makes an HTTP request
+   - Asserts HTTP status + business response
+3. **Every new endpoint must include a negative test** (e.g., missing boundary, unauthorized subject, invalid transition).
+4. **Screen-capture evidence is mandatory for E2E scenarios.** Run `mvn test -pl :policy-decision-service` and verify `target/screen-capture/` is populated.
 
 ## Data and Security Test Rules
 

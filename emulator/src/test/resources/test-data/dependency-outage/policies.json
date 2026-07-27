@@ -1,0 +1,25 @@
+[
+  {
+    "name": "POL.ALLOW.ACCOUNT.READ.v1",
+    "state": "ACTIVE",
+    "effect": "ALLOW",
+    "action": "read",
+    "resourceType": "account",
+    "subjectId": "user-reader",
+    "subjectType": "human",
+    "tenant": "tenant-a",
+    "geography": "us",
+    "market": "retail",
+    "lineOfBusiness": "cards",
+    "channel": "staff"
+  },
+  {
+    "name": "POL.ALLOW.MONITORING.READ.v1",
+    "state": "ACTIVE",
+    "effect": "ALLOW",
+    "action": "read",
+    "resourceType": "health",
+    "subjectType": "workload",
+    "channel": "system"
+  }
+]

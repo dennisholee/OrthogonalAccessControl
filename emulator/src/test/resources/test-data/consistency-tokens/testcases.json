@@ -1,0 +1,27 @@
+[
+  {
+    "name": "Read without consistency token allowed",
+    "request": {
+      "subject": { "type": "human", "id": "user-reader" },
+      "action": "read",
+      "resource": { "type": "account", "id": "acc-1" },
+      "boundaryContext": {
+        "tenant": "tenant-a", "geography": "us", "market": "retail", "lineOfBusiness": "cards", "channel": "staff"
+      }
+    },
+    "expected": "ALLOW"
+  },
+  {
+    "name": "Stale consistency token rejected (token-stale-999)",
+    "request": {
+      "subject": { "type": "human", "id": "user-reader" },
+      "action": "read",
+      "resource": { "type": "account", "id": "acc-1" },
+      "consistencyToken": "token-stale-999",
+      "boundaryContext": {
+        "tenant": "tenant-a", "geography": "us", "market": "retail", "lineOfBusiness": "cards", "channel": "staff"
+      }
+    },
+    "expected": "DENY"
+  }
+]

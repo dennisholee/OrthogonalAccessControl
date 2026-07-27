@@ -1,0 +1,28 @@
+[
+  {
+    "name": "POL.WORKLOAD.REPORTING.READ.v1",
+    "state": "ACTIVE",
+    "effect": "ALLOW",
+    "action": "read_aggregate",
+    "resourceType": "order",
+    "subjectId": "reporting-service",
+    "subjectType": "workload"
+  },
+  {
+    "name": "POL.WORKLOAD.GENERAL.READ.v1",
+    "state": "ACTIVE",
+    "effect": "ALLOW",
+    "action": "read",
+    "resourceType": "order",
+    "subjectType": "workload"
+  },
+  {
+    "name": "POL.WORKLOAD.SYSTEM.CONFIG.v1",
+    "state": "ACTIVE",
+    "effect": "ALLOW",
+    "action": "read",
+    "resourceType": "config",
+    "subjectType": "workload",
+    "channel": "system"
+  }
+]

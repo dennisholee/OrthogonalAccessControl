@@ -125,7 +125,6 @@ public class OrderServiceSteps {
 
     @Given("a baseline ALLOW policy is seeded for subject {string} action {string} resource {string}")
     public void seedAllowPolicy(String subjectId, String action, String resourceType) {
-        // Store action in lowercase to match DirectDecisionClient's normalization
         String storedAction = action.toLowerCase();
         Map<String, Object> policy = new LinkedHashMap<>();
         policy.put("name", "POL.ALLOW." + subjectId.toUpperCase() + ".v1");
@@ -149,7 +148,6 @@ public class OrderServiceSteps {
             policy.put("fieldMasks", masks);
         }
         if ("auditor".equals(subjectId)) {
-            // Auditor sees all orders but with all PII fully redacted
             List<Map<String, String>> masks = List.of(
                     Map.of("field", "customer.email", "level", "NONE"),
                     Map.of("field", "customer.ssn", "level", "NONE"),
@@ -208,6 +206,121 @@ public class OrderServiceSteps {
         this.headers.put(headerName, headerValue);
     }
 
+    // ==================== EXTENDED GIVEN STEPS ====================
+
+    @Given("a SpEL-ALLOW policy is seeded for subject {string} with condition {string}")
+    public void seedSpelPolicy(String subjectId, String spelCondition) {
+        Map<String, Object> policy = new LinkedHashMap<>();
+        policy.put("name", "POL.SPEL." + subjectId.toUpperCase() + ".v1");
+        policy.put("effect", "ALLOW");
+        policy.put("state", "ACTIVE");
+        policy.put("subjectId", subjectId);
+        policy.put("action", "read");
+        policy.put("resourceType", "order");
+        policy.put("tenant", "acme-corp");
+        policy.put("geography", "global");
+        policy.put("market", "enterprise");
+        policy.put("lineOfBusiness", "ecommerce");
+        policy.put("channel", "staff");
+        policy.put("spelCondition", spelCondition);
+        mongoTemplate.save(policy, "policies");
+        screenCapture.captureSeedData("policies (SpEL " + subjectId + ")", policy);
+        screenCapture.log("Seeded SpEL policy for subject: " + subjectId + " condition: " + spelCondition);
+    }
+
+    @Given("a time-window ALLOW policy is seeded for subject {string} with window {string}")
+    public void seedTimeWindowPolicy(String subjectId, String timeWindow) {
+        Map<String, Object> policy = new LinkedHashMap<>();
+        policy.put("name", "POL.TIME.WINDOW." + subjectId.toUpperCase() + ".v1");
+        policy.put("effect", "ALLOW");
+        policy.put("state", "ACTIVE");
+        policy.put("subjectId", subjectId);
+        policy.put("action", "read");
+        policy.put("resourceType", "order");
+        policy.put("tenant", "acme-corp");
+        policy.put("geography", "global");
+        policy.put("market", "enterprise");
+        policy.put("lineOfBusiness", "ecommerce");
+        policy.put("channel", "staff");
+        policy.put("timeWindow", timeWindow);
+        mongoTemplate.save(policy, "policies");
+        screenCapture.captureSeedData("policies (time-window " + subjectId + ")", policy);
+        screenCapture.log("Seeded time-window policy for subject: " + subjectId + " window: " + timeWindow);
+    }
+
+    @Given("a break-glass ALLOW policy is seeded for action {string} resource {string}")
+    public void seedBreakGlassPolicy(String action, String resourceType) {
+        Map<String, Object> policy = new LinkedHashMap<>();
+        policy.put("name", "POL.BREAK.GLASS.v1");
+        policy.put("effect", "ALLOW");
+        policy.put("state", "ACTIVE");
+        policy.put("action", action);
+        policy.put("resourceType", resourceType);
+        policy.put("tenant", "acme-corp");
+        policy.put("geography", "global");
+        policy.put("market", "enterprise");
+        policy.put("lineOfBusiness", "ecommerce");
+        policy.put("channel", "staff");
+        mongoTemplate.save(policy, "policies");
+        screenCapture.captureSeedData("policies (break-glass " + action + " " + resourceType + ")", policy);
+        screenCapture.log("Seeded break-glass policy for action: " + action + " resource: " + resourceType);
+    }
+
+    @Given("a tenant-scoped ALLOW policy is seeded for subject {string} tenant {string}")
+    public void seedTenantScopedPolicy(String subjectId, String tenant) {
+        Map<String, Object> policy = new LinkedHashMap<>();
+        policy.put("name", "POL.TENANT." + subjectId.toUpperCase() + ".v1");
+        policy.put("effect", "ALLOW");
+        policy.put("state", "ACTIVE");
+        policy.put("subjectId", subjectId);
+        policy.put("action", "read");
+        policy.put("resourceType", "order");
+        policy.put("tenant", tenant);
+        policy.put("geography", "global");
+        policy.put("market", "enterprise");
+        policy.put("lineOfBusiness", "ecommerce");
+        policy.put("channel", "staff");
+        mongoTemplate.save(policy, "policies");
+        screenCapture.captureSeedData("policies (tenant " + tenant + " for " + subjectId + ")", policy);
+        screenCapture.log("Seeded tenant-scoped policy for subject: " + subjectId + " tenant: " + tenant);
+    }
+
+    @Given("a channel-scoped ALLOW policy is seeded for subject {string} channel {string}")
+    public void seedChannelScopedPolicy(String subjectId, String channel) {
+        Map<String, Object> policy = new LinkedHashMap<>();
+        policy.put("name", "POL.CHANNEL." + subjectId.toUpperCase() + ".v1");
+        policy.put("effect", "ALLOW");
+        policy.put("state", "ACTIVE");
+        policy.put("subjectId", subjectId);
+        policy.put("action", "read");
+        policy.put("resourceType", "order");
+        policy.put("tenant", "acme-corp");
+        policy.put("geography", "global");
+        policy.put("market", "enterprise");
+        policy.put("lineOfBusiness", "ecommerce");
+        policy.put("channel", channel);
+        mongoTemplate.save(policy, "policies");
+        screenCapture.captureSeedData("policies (channel " + channel + " for " + subjectId + ")", policy);
+        screenCapture.log("Seeded channel-scoped policy for subject: " + subjectId + " channel: " + channel);
+    }
+
+    @Given("a relationship chain {string} is saved")
+    public void saveRelationshipChain(String chainSpec) {
+        String[] parts = chainSpec.split(":");
+        String relationshipType = parts.length > 1 ? parts[1] : "manages";
+        String[] nodes = parts[0].split("->");
+
+        for (int i = 0; i < nodes.length - 1; i++) {
+            Map<String, Object> rel = new LinkedHashMap<>();
+            rel.put("subjectId", nodes[i]);
+            rel.put("resourceId", nodes[i + 1]);
+            rel.put("relationshipType", relationshipType);
+            rel.put("createdAt", Instant.now().toString());
+            mongoTemplate.save(rel, "relationships");
+        }
+        screenCapture.log("Saved relationship chain: " + chainSpec);
+    }
+
     // ==================== WHEN ====================
 
     @When("a GET request is sent to {string}")
@@ -220,8 +333,6 @@ public class OrderServiceSteps {
             this.response = restTemplate.exchange(url, HttpMethod.GET, entity,
                     new ParameterizedTypeReference<Map<String, Object>>() {});
         } catch (Exception e) {
-            // For list endpoints (e.g., /api/orders), the response is an array.
-            // Catch the parse error and store just the status.
             ResponseEntity<String> rawResponse = restTemplate.exchange(url, HttpMethod.GET, entity, String.class);
             this.response = new ResponseEntity<>(
                     Map.of("error", "Array response captured as raw string"),
@@ -241,6 +352,17 @@ public class OrderServiceSteps {
         this.response = restTemplate.exchange(url, HttpMethod.POST, entity,
                 new ParameterizedTypeReference<Map<String, Object>>() {});
         captureRequestEvidence("POST", url, this.headers, null);
+    }
+
+    @When("a DELETE request is sent to {string}")
+    public void sendDeleteRequest(String path) {
+        String url = "http://localhost:" + CucumberSpringConfiguration.getPort() + path;
+        HttpHeaders httpHeaders = new HttpHeaders();
+        this.headers.forEach(httpHeaders::set);
+        HttpEntity<Void> entity = new HttpEntity<>(httpHeaders);
+        this.response = restTemplate.exchange(url, HttpMethod.DELETE, entity,
+                new ParameterizedTypeReference<Map<String, Object>>() {});
+        captureRequestEvidence("DELETE", url, this.headers, null);
     }
 
     // ==================== THEN ====================
@@ -317,26 +439,26 @@ public class OrderServiceSteps {
     }
 
     @Then("the list entry at index {int} field {string} should be {string}")
-public void verifyListEntryFieldValue(int index, String fieldName, String expectedValue) {
-    String url = "http://localhost:" + CucumberSpringConfiguration.getPort() + "/api/orders";
-    HttpHeaders httpHeaders = new HttpHeaders();
-    this.headers.forEach(httpHeaders::set);
-    HttpEntity<Void> entity = new HttpEntity<>(httpHeaders);
-    ResponseEntity<List> listResponse = restTemplate.exchange(url, HttpMethod.GET, entity, List.class);
+    public void verifyListEntryFieldValue(int index, String fieldName, String expectedValue) {
+        String url = "http://localhost:" + CucumberSpringConfiguration.getPort() + "/api/orders";
+        HttpHeaders httpHeaders = new HttpHeaders();
+        this.headers.forEach(httpHeaders::set);
+        HttpEntity<Void> entity = new HttpEntity<>(httpHeaders);
+        ResponseEntity<List> listResponse = restTemplate.exchange(url, HttpMethod.GET, entity, List.class);
 
-    assertThat(listResponse.getBody()).isNotNull();
-    assertThat(listResponse.getBody().size()).isGreaterThan(index);
-    Object entry = listResponse.getBody().get(index);
-    assertThat(entry).isInstanceOf(Map.class);
-    @SuppressWarnings("unchecked")
-    Map<String, Object> entryMap = (Map<String, Object>) entry;
-    Object actualValue = entryMap.get(fieldName);
-    assertThat(actualValue).isEqualTo(expectedValue);
-    screenCapture.logAssertion("List[" + index + "]." + fieldName, expectedValue.equals(actualValue),
-            expectedValue, String.valueOf(actualValue));
-}
+        assertThat(listResponse.getBody()).isNotNull();
+        assertThat(listResponse.getBody().size()).isGreaterThan(index);
+        Object entry = listResponse.getBody().get(index);
+        assertThat(entry).isInstanceOf(Map.class);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> entryMap = (Map<String, Object>) entry;
+        Object actualValue = entryMap.get(fieldName);
+        assertThat(actualValue).isEqualTo(expectedValue);
+        screenCapture.logAssertion("List[" + index + "]." + fieldName, expectedValue.equals(actualValue),
+                expectedValue, String.valueOf(actualValue));
+    }
 
-@Then("the list entry at index {int} field {string} should be null")
+    @Then("the list entry at index {int} field {string} should be null")
     public void verifyListEntryFieldNull(int index, String fieldName) {
         String url = "http://localhost:" + CucumberSpringConfiguration.getPort() + "/api/orders";
         HttpHeaders httpHeaders = new HttpHeaders();

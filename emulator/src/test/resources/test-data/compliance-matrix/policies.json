@@ -1,0 +1,16 @@
+[
+  {
+    "name": "POL.COMPLIANCE.MARKET.LOB.ALLOW.v1",
+    "state": "ACTIVE",
+    "effect": "ALLOW",
+    "action": "read",
+    "resourceType": "account",
+    "subjectId": "user-compliant",
+    "subjectType": "human",
+    "tenant": "tenant-a",
+    "geography": "us",
+    "market": "retail",
+    "lineOfBusiness": "cards",
+    "channel": "staff"
+  }
+]

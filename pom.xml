@@ -16,6 +16,8 @@
     <module>libraries/spring-policy-enforcement-starter</module>
     <module>samples/entitlement-managed-order-service</module>
     <module>samples/non-intrusive-entitlement</module>
+    <module>libraries/standalone-emulator</module>
+    <module>emulator</module>
   </modules>
 
   <properties>

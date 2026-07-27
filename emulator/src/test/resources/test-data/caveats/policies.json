@@ -1,0 +1,27 @@
+[
+  {
+    "name": "POL.CAVEAT.TIME.WINDOW.v1",
+    "state": "ACTIVE",
+    "effect": "ALLOW",
+    "action": "read",
+    "resourceType": "account",
+    "timeWindow": "09:00-17:00 UTC"
+  },
+  {
+    "name": "POL.CAVEAT.SOURCE.IP.v1",
+    "state": "ACTIVE",
+    "effect": "ALLOW",
+    "action": "read",
+    "resourceType": "account",
+    "sourceIpRange": "10.0.0.0/8"
+  },
+  {
+    "name": "POL.CAVEAT.COMBINED.v1",
+    "state": "ACTIVE",
+    "effect": "ALLOW",
+    "action": "read",
+    "resourceType": "account",
+    "timeWindow": "09:00-17:00 UTC",
+    "sourceIpRange": "10.0.0.0/8"
+  }
+]

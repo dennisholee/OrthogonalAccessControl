@@ -1,0 +1,46 @@
+[
+  {
+    "name": "POL.DENY.ATTACKER.v1",
+    "state": "ACTIVE",
+    "effect": "DENY",
+    "action": "*",
+    "resourceType": "*",
+    "subjectId": "attacker",
+    "subjectType": "human",
+    "tenant": "*",
+    "geography": "*",
+    "market": "*",
+    "lineOfBusiness": "*",
+    "channel": "*"
+  },
+  {
+    "name": "POL.ALLOW.REBAC.READ.ORDER.v1",
+    "state": "ACTIVE",
+    "effect": "ALLOW",
+    "action": "read",
+    "resourceType": "order",
+    "requiredRelationship": "manages"
+  },
+  {
+    "name": "POL.ALLOW.SPEL.COMPLIANCE.v1",
+    "state": "ACTIVE",
+    "effect": "ALLOW",
+    "action": "read",
+    "resourceType": "order",
+    "spelCondition": "subject.department == 'compliance'"
+  },
+  {
+    "name": "POL.ALLOW.ACCOUNT.READ.v1",
+    "state": "ACTIVE",
+    "effect": "ALLOW",
+    "action": "read",
+    "resourceType": "account",
+    "subjectId": "staff-reader",
+    "subjectType": "human",
+    "tenant": "acme",
+    "geography": "EU",
+    "market": "enterprise",
+    "lineOfBusiness": "supply-chain",
+    "channel": "staff"
+  }
+]

@@ -1,0 +1,50 @@
+[
+  {
+    "name": "Same market and LOB compliant allows",
+    "request": {
+      "subject": { "type": "human", "id": "user-compliant" },
+      "action": "read",
+      "resource": { "type": "account", "id": "acc-1" },
+      "boundaryContext": {
+        "tenant": "tenant-a", "geography": "us", "market": "retail", "lineOfBusiness": "cards", "channel": "staff"
+      }
+    },
+    "expected": "ALLOW"
+  },
+  {
+    "name": "Different market violates compliance",
+    "request": {
+      "subject": { "type": "human", "id": "user-compliant" },
+      "action": "read",
+      "resource": { "type": "account", "id": "acc-2" },
+      "boundaryContext": {
+        "tenant": "tenant-a", "geography": "us", "market": "enterprise", "lineOfBusiness": "cards", "channel": "staff"
+      }
+    },
+    "expected": "DENY"
+  },
+  {
+    "name": "Different LOB violates compliance",
+    "request": {
+      "subject": { "type": "human", "id": "user-compliant" },
+      "action": "read",
+      "resource": { "type": "account", "id": "acc-3" },
+      "boundaryContext": {
+        "tenant": "tenant-a", "geography": "us", "market": "retail", "lineOfBusiness": "supply-chain", "channel": "staff"
+      }
+    },
+    "expected": "DENY"
+  },
+  {
+    "name": "Different market and LOB violates compliance",
+    "request": {
+      "subject": { "type": "human", "id": "user-compliant" },
+      "action": "read",
+      "resource": { "type": "account", "id": "acc-4" },
+      "boundaryContext": {
+        "tenant": "tenant-a", "geography": "us", "market": "enterprise", "lineOfBusiness": "platform", "channel": "staff"
+      }
+    },
+    "expected": "DENY"
+  }
+]

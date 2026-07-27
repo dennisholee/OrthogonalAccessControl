@@ -1,0 +1,75 @@
+[
+  {
+    "name": "CSR reads order with PII fields masked",
+    "request": {
+      "subject": { "type": "human", "id": "csr-user" },
+      "action": "read",
+      "resource": { "type": "order", "id": "ORD-789" },
+      "boundaryContext": {
+        "tenant": "acme", "geography": "EU", "market": "enterprise", "lineOfBusiness": "supply-chain", "channel": "staff"
+      }
+    },
+    "expected": "ALLOW"
+  },
+  {
+    "name": "Admin reads order with full visibility",
+    "request": {
+      "subject": { "type": "human", "id": "admin-user" },
+      "action": "read",
+      "resource": { "type": "order", "id": "ORD-789" },
+      "boundaryContext": {
+        "tenant": "acme", "geography": "EU", "market": "enterprise", "lineOfBusiness": "supply-chain", "channel": "staff"
+      }
+    },
+    "expected": "ALLOW"
+  },
+  {
+    "name": "Workload reads aggregate with PII removed",
+    "request": {
+      "subject": { "type": "workload", "id": "reporting-service" },
+      "action": "read_aggregate",
+      "resource": { "type": "order", "id": "aggregate" },
+      "boundaryContext": {
+        "tenant": "acme", "geography": "*", "market": "*", "lineOfBusiness": "*", "channel": "system"
+      }
+    },
+    "expected": "ALLOW"
+  },
+  {
+    "name": "Tag-based PII classification field masks email",
+    "request": {
+      "subject": { "type": "human", "id": "default-user" },
+      "action": "read",
+      "resource": { "type": "order", "id": "ORD-789" },
+      "runtimeContext": {
+        "piiClassification": [
+          {"fieldPattern": "*.email", "accessLevel": "MASK"}
+        ]
+      },
+      "boundaryContext": {
+        "tenant": "acme", "geography": "EU", "market": "enterprise", "lineOfBusiness": "supply-chain", "channel": "staff"
+      }
+    },
+    "expected": "ALLOW"
+  },
+  {
+    "name": "Field-level ACL overrides tag-based classification",
+    "request": {
+      "subject": { "type": "human", "id": "override-user" },
+      "action": "read",
+      "resource": { "type": "order", "id": "ORD-789" },
+      "runtimeContext": {
+        "piiClassification": [
+          {"fieldPattern": "*.email", "accessLevel": "MASK"}
+        ],
+        "fieldMasks": [
+          {"field": "customer.email", "level": "READ"}
+        ]
+      },
+      "boundaryContext": {
+        "tenant": "acme", "geography": "EU", "market": "enterprise", "lineOfBusiness": "supply-chain", "channel": "staff"
+      }
+    },
+    "expected": "ALLOW"
+  }
+]

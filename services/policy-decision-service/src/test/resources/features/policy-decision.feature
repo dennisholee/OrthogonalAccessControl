@@ -380,24 +380,23 @@ Feature: Orthogonal Access Control — Full Semantic Entitlement Enforcement
 
   @Governance
   Scenario: Maker-checker — policy author cannot self-approve promotion
-    Given a create policy request for effect "ALLOW" and name "POL.GOV.MAKER.CHECKER.v1"
+    Given a create policy request for effect "ALLOW" and name "POL.GOV.MAKER.CHECKER.v1" with author "alice-admin"
     When the policy create request is sent via HTTP
     Then the response status should be 201
     And the policy state should be "DRAFT"
-    When a promote policy request is sent for the created policy to state "ACTIVE"
-    Then the response status should be 200
-    And the policy state should be "ACTIVE"
+    When a promote policy request is sent by principal "alice-admin" for the created policy to state "ACTIVE"
+    Then the response status should be 409
+    And the decision code should be "GOVERNANCE_CONFLICT"
 
   @Governance
   Scenario: Separation-of-duties — non-owner cannot promote policy
-    Given a create policy request for effect "ALLOW" and name "POL.GOV.SOD.v1"
+    Given a create policy request for effect "ALLOW" and name "POL.GOV.SOD.v1" with author "bob-author"
     When the policy create request is sent via HTTP
     Then the response status should be 201
     And the policy state should be "DRAFT"
-    # Attempt promotion without proper approver role tests that authorization gate exists
-    When a promote policy request is sent for the created policy to state "ACTIVE"
-    Then the response status should be 200
-    And the policy state should be "ACTIVE"
+    When a promote policy request is sent by principal "unauthorized-user" for the created policy to state "ACTIVE"
+    Then the response status should be 403
+    And the decision code should be "GOVERNANCE_SOD_VIOLATION"
 
   @Governance
   Scenario: Policy DRAFT→VALIDATED→APPROVED→ACTIVE lifecycle with full promotion chain

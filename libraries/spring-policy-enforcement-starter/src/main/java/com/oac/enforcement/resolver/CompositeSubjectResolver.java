@@ -5,6 +5,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.core.OrderComparator;
 import org.springframework.core.Ordered;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -21,7 +22,7 @@ public class CompositeSubjectResolver implements SubjectResolver {
     private final List<SubjectResolver> resolvers;
 
     public CompositeSubjectResolver(List<SubjectResolver> resolvers) {
-        this.resolvers = resolvers;
+        this.resolvers = new ArrayList<>(resolvers);
         this.resolvers.sort(OrderComparator.INSTANCE);
     }
 

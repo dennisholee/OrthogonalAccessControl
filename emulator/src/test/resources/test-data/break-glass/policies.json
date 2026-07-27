@@ -1,0 +1,20 @@
+[
+  {
+    "name": "POL.BREAKGLASS.ACCOUNT.READ.v1",
+    "state": "ACTIVE",
+    "effect": "ALLOW",
+    "action": "read",
+    "resourceType": "account",
+    "subjectId": "emergency-user",
+    "subjectType": "human"
+  },
+  {
+    "name": "POL.BREAKGLASS.GLOBAL.DENY.v1",
+    "state": "ACTIVE",
+    "effect": "DENY",
+    "action": "*",
+    "resourceType": "*",
+    "subjectId": "blocked-user",
+    "subjectType": "human"
+  }
+]

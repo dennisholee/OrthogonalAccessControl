@@ -1,0 +1,26 @@
+[
+  {
+    "name": "Normal operation with healthy dependency allows",
+    "request": {
+      "subject": { "type": "human", "id": "user-reader" },
+      "action": "read",
+      "resource": { "type": "account", "id": "acc-1" },
+      "boundaryContext": {
+        "tenant": "tenant-a", "geography": "us", "market": "retail", "lineOfBusiness": "cards", "channel": "staff"
+      }
+    },
+    "expected": "ALLOW"
+  },
+  {
+    "name": "Unknown user with healthy dependency defaults to deny",
+    "request": {
+      "subject": { "type": "human", "id": "unknown-user" },
+      "action": "read",
+      "resource": { "type": "account", "id": "acc-1" },
+      "boundaryContext": {
+        "tenant": "tenant-a", "geography": "us", "market": "retail", "lineOfBusiness": "cards", "channel": "staff"
+      }
+    },
+    "expected": "DENY"
+  }
+]

@@ -1,0 +1,11 @@
+[
+  {
+    "name": "POL.CONSISTENCY.READ.ALLOW.v1",
+    "state": "ACTIVE",
+    "effect": "ALLOW",
+    "action": "read",
+    "resourceType": "account",
+    "subjectId": "user-reader",
+    "subjectType": "human"
+  }
+]

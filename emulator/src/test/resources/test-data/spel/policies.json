@@ -1,0 +1,34 @@
+[
+  {
+    "name": "POL.SPEL.COMPLIANCE.READ.v1",
+    "state": "ACTIVE",
+    "effect": "ALLOW",
+    "action": "read",
+    "resourceType": "order",
+    "spelCondition": "subject.department == 'compliance'"
+  },
+  {
+    "name": "POL.SPEL.SOD.APPROVE.v1",
+    "state": "ACTIVE",
+    "effect": "ALLOW",
+    "action": "approve",
+    "resourceType": "transaction",
+    "spelCondition": "subject.id != resource.requesterId"
+  },
+  {
+    "name": "POL.SPEL.RISK.THRESHOLD.v1",
+    "state": "ACTIVE",
+    "effect": "ALLOW",
+    "action": "execute_trade",
+    "resourceType": "order",
+    "spelCondition": "environment.riskScore < 70"
+  },
+  {
+    "name": "POL.SPEL.BUSINESS.HOURS.v1",
+    "state": "ACTIVE",
+    "effect": "ALLOW",
+    "action": "read",
+    "resourceType": "document",
+    "spelCondition": "environment.hour >= 9 && environment.hour < 17"
+  }
+]

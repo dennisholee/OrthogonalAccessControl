@@ -1,0 +1,56 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.oac</groupId>
+    <artifactId>orthogonal-access-control</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <relativePath>../pom.xml</relativePath>
+  </parent>
+
+  <artifactId>oac-policy-emulator-cli</artifactId>
+  <name>OAC Policy Emulator CLI</name>
+  <description>Command-line interface for the OAC policy emulator. Runs the real PDP rule chain with in-memory adapters — no database required.</description>
+
+  <dependencies>
+    <!-- Standalone emulator library (in-memory adapters + Spring config) -->
+    <dependency>
+      <groupId>com.oac</groupId>
+      <artifactId>oac-standalone-emulator</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+
+    <!-- Spring Boot starter for CLI -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter</artifactId>
+    </dependency>
+
+    <!-- Jackson for JSON parsing -->
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-maven-plugin</artifactId>
+        <configuration>
+          <mainClass>com.oac.emulator.cli.PolicyEmulatorCLI</mainClass>
+        </configuration>
+        <executions>
+          <execution>
+            <goals>
+              <goal>repackage</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>

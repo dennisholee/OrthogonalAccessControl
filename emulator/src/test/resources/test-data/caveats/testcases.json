@@ -1,0 +1,86 @@
+[
+  {
+    "name": "Time window caveat inside business hours allows",
+    "request": {
+      "subject": { "type": "human", "id": "user-reader" },
+      "action": "read",
+      "resource": { "type": "account", "id": "acc-1" },
+      "runtimeContext": { "requestTime": "2026-06-24T14:00:00Z" },
+      "boundaryContext": {
+        "tenant": "tenant-a", "geography": "us", "market": "retail", "lineOfBusiness": "cards", "channel": "staff"
+      }
+    },
+    "expected": "ALLOW"
+  },
+  {
+    "name": "Time window caveat outside business hours denies",
+    "request": {
+      "subject": { "type": "human", "id": "user-reader" },
+      "action": "read",
+      "resource": { "type": "account", "id": "acc-1" },
+      "runtimeContext": { "requestTime": "2026-06-24T03:00:00Z" },
+      "boundaryContext": {
+        "tenant": "tenant-a", "geography": "us", "market": "retail", "lineOfBusiness": "cards", "channel": "staff"
+      }
+    },
+    "expected": "DENY"
+  },
+  {
+    "name": "Source IP inside allowed range allows",
+    "request": {
+      "subject": { "type": "human", "id": "user-reader" },
+      "action": "read",
+      "resource": { "type": "account", "id": "acc-1" },
+      "runtimeContext": { "sourceIp": "10.0.0.55" },
+      "boundaryContext": {
+        "tenant": "tenant-a", "geography": "us", "market": "retail", "lineOfBusiness": "cards", "channel": "staff"
+      }
+    },
+    "expected": "ALLOW"
+  },
+  {
+    "name": "Source IP outside allowed range denies",
+    "request": {
+      "subject": { "type": "human", "id": "user-reader" },
+      "action": "read",
+      "resource": { "type": "account", "id": "acc-1" },
+      "runtimeContext": { "sourceIp": "192.168.1.1" },
+      "boundaryContext": {
+        "tenant": "tenant-a", "geography": "us", "market": "retail", "lineOfBusiness": "cards", "channel": "staff"
+      }
+    },
+    "expected": "DENY"
+  },
+  {
+    "name": "Both caveats pass (business hours + inside IP) allows",
+    "request": {
+      "subject": { "type": "human", "id": "user-reader" },
+      "action": "read",
+      "resource": { "type": "account", "id": "acc-1" },
+      "runtimeContext": {
+        "requestTime": "2026-06-24T14:00:00Z",
+        "sourceIp": "10.0.0.55"
+      },
+      "boundaryContext": {
+        "tenant": "tenant-a", "geography": "us", "market": "retail", "lineOfBusiness": "cards", "channel": "staff"
+      }
+    },
+    "expected": "ALLOW"
+  },
+  {
+    "name": "Time window passes but IP outside denies",
+    "request": {
+      "subject": { "type": "human", "id": "user-reader" },
+      "action": "read",
+      "resource": { "type": "account", "id": "acc-1" },
+      "runtimeContext": {
+        "requestTime": "2026-06-24T14:00:00Z",
+        "sourceIp": "192.168.1.1"
+      },
+      "boundaryContext": {
+        "tenant": "tenant-a", "geography": "us", "market": "retail", "lineOfBusiness": "cards", "channel": "staff"
+      }
+    },
+    "expected": "DENY"
+  }
+]

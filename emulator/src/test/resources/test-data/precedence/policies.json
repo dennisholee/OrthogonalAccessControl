@@ -1,0 +1,60 @@
+[
+  {
+    "name": "global-deny-attacker",
+    "state": "ACTIVE",
+    "effect": "DENY",
+    "action": "*",
+    "resourceType": "*",
+    "resourceId": "*",
+    "subjectId": "attacker",
+    "subjectType": "human",
+    "tenant": "*",
+    "geography": "*",
+    "market": "*",
+    "lineOfBusiness": "*",
+    "channel": "*"
+  },
+  {
+    "name": "allow-user-reader-account-read",
+    "state": "ACTIVE",
+    "effect": "ALLOW",
+    "action": "read",
+    "resourceType": "account",
+    "resourceId": "acc-1",
+    "subjectId": "user-reader",
+    "subjectType": "human",
+    "tenant": "tenant-a",
+    "geography": "us",
+    "market": "retail",
+    "lineOfBusiness": "cards",
+    "channel": "staff"
+  },
+  {
+    "name": "deny-writer-delete",
+    "state": "ACTIVE",
+    "effect": "DENY",
+    "action": "delete",
+    "resourceType": "account",
+    "subjectId": "user-writer",
+    "subjectType": "human",
+    "tenant": "*",
+    "geography": "*",
+    "market": "*",
+    "lineOfBusiness": "*",
+    "channel": "*"
+  },
+  {
+    "name": "allow-writer-write",
+    "state": "ACTIVE",
+    "effect": "ALLOW",
+    "action": "write",
+    "resourceType": "account",
+    "subjectId": "user-writer",
+    "subjectType": "human",
+    "tenant": "*",
+    "geography": "*",
+    "market": "*",
+    "lineOfBusiness": "*",
+    "channel": "*"
+  }
+]

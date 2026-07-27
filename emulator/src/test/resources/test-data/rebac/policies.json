@@ -1,0 +1,18 @@
+[
+  {
+    "name": "POL.REBAC.ORDER.APPROVE.ALLOW.v1",
+    "state": "ACTIVE",
+    "effect": "ALLOW",
+    "action": "approve",
+    "resourceType": "order",
+    "requiredRelationship": "manages"
+  },
+  {
+    "name": "POL.REBAC.ORDER.READ.ALLOW.v1",
+    "state": "ACTIVE",
+    "effect": "ALLOW",
+    "action": "read",
+    "resourceType": "order",
+    "requiredRelationship": "owner"
+  }
+]

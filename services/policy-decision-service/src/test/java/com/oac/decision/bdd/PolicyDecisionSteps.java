@@ -471,6 +471,13 @@ public class PolicyDecisionSteps {
         screenCapture.log("Simulated MongoDB stop: dependency flagged as unhealthy");
     }
 
+    @Given("MongoDB is started")
+    public void startMongoDB() {
+        // Restore MongoDB dependency health
+        this.runtimeContext.put("dependencyHealthy", true);
+        screenCapture.log("Simulated MongoDB start: dependency flagged as healthy");
+    }
+
     @Given("a create policy request for effect {string} and name {string}")
     public void prepareCreatePolicy(String effect, String name) {
         this.requestBody.clear();
@@ -480,6 +487,110 @@ public class PolicyDecisionSteps {
         this.requestBody.put("author", "test-author");
         this.requestBody.put("riskLevel", "LOW");
         screenCapture.log("Prepared create-policy request: " + name + " effect=" + effect);
+    }
+
+    @Given("a create policy request for effect {string} and name {string} with author {string}")
+    public void prepareCreatePolicyWithAuthor(String effect, String name, String author) {
+        this.requestBody.clear();
+        this.requestBody.put("name", name);
+        this.requestBody.put("effect", effect);
+        this.requestBody.put("owner", author);
+        this.requestBody.put("author", author);
+        this.requestBody.put("riskLevel", "LOW");
+        screenCapture.log("Prepared create-policy request: " + name + " effect=" + effect + " author=" + author);
+    }
+
+    // ==================== POLICY SPEC / CONDITION COMPOSITION STEPS ====================
+
+    private com.oac.decision.model.PolicySpec.Builder policySpecBuilder;
+
+    @Given("a policy spec with effect {string} and name {string}")
+    public void createPolicySpec(String effect, String name) {
+        this.policySpecBuilder = com.oac.decision.model.PolicySpec.builder()
+                .effect(effect)
+                .name(name);
+        this.requestBody.clear();
+        screenCapture.log("Created policy spec: " + name + " effect=" + effect);
+    }
+
+    @Given("a condition of type {string} with expression {string}")
+    public void addSpelCondition(String type, String expression) {
+        if ("spel".equals(type)) {
+            this.policySpecBuilder.addCondition(com.oac.decision.model.PolicyCondition.spel(expression));
+            screenCapture.log("Added spel condition: " + expression);
+        }
+    }
+
+    @Given("a condition of type {string} with window {string} and timezone {string}")
+    public void addTimeWindowCondition(String type, String window, String timezone) {
+        if ("timeWindow".equals(type)) {
+            this.policySpecBuilder.addCondition(com.oac.decision.model.PolicyCondition.timeWindow(window, timezone));
+            screenCapture.log("Added timeWindow condition: " + window + " " + timezone);
+        }
+    }
+
+    @Given("a condition of type {string} with cidr {string}")
+    public void addSourceIpCondition(String type, String cidr) {
+        if ("sourceIp".equals(type)) {
+            this.policySpecBuilder.addCondition(com.oac.decision.model.PolicyCondition.sourceIp(cidr));
+            screenCapture.log("Added sourceIp condition: " + cidr);
+        }
+    }
+
+    @Given("a condition of type {string} with relationship {string}")
+    public void addRebacCondition(String type, String relationship) {
+        if ("rebac".equals(type)) {
+            this.policySpecBuilder.addCondition(com.oac.decision.model.PolicyCondition.rebac(relationship));
+            screenCapture.log("Added rebac condition: " + relationship);
+        }
+    }
+
+    @Given("the policy spec conditions are saved to MongoDB")
+    public void savePolicySpecToMongoDB() {
+        com.oac.decision.model.PolicySpec spec = this.policySpecBuilder.build();
+        java.util.Map<String, Object> doc = spec.toDocument();
+        mongoTemplate.save(doc, "policies");
+        screenCapture.captureSeedData("policies (spec: " + spec.name() + ")", doc);
+        screenCapture.log("Saved policy spec to MongoDB: " + spec.name()
+                + " with " + spec.conditions().size() + " conditions");
+    }
+
+    @Given("the subject type is {string}")
+    public void setPolicySpecSubjectType(String subjectType) {
+        if (this.policySpecBuilder != null) {
+            this.policySpecBuilder.subjectType(subjectType);
+        }
+        screenCapture.log("Set policy spec subject type: " + subjectType);
+    }
+
+    @Given("a flat-format policy document with effect {string} and spelCondition {string} is saved to MongoDB")
+    public void saveFlatFormatPolicyWithSpel(String effect, String spelCondition) {
+        java.util.Map<String, Object> policy = new java.util.LinkedHashMap<>();
+        String name = "POL.FLAT.SPEL." + java.util.UUID.randomUUID().toString().substring(0, 8);
+        policy.put("name", name);
+        policy.put("effect", effect);
+        policy.put("state", "ACTIVE");
+        policy.put("spelCondition", spelCondition);
+        mongoTemplate.save(policy, "policies");
+        screenCapture.captureSeedData("policies (flat: " + name + ")", policy);
+        screenCapture.log("Saved flat-format policy with spelCondition: " + spelCondition);
+    }
+
+    @When("the policy spec is submitted for creation via HTTP")
+    public void sendPolicySpecCreateRequest() {
+        com.oac.decision.model.PolicySpec spec = this.policySpecBuilder.build();
+        java.util.Map<String, Object> body = spec.toDocument();
+        body.put("owner", "test-owner");
+        body.put("author", "test-author");
+        body.put("riskLevel", "LOW");
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        HttpEntity<java.util.Map<String, Object>> entity = new HttpEntity<>(body, headers);
+        String url = "http://localhost:" + CucumberSpringConfiguration.getPort() + "/v1/admin/policies";
+        this.response = restTemplate.exchange(url, HttpMethod.POST, entity, new ParameterizedTypeReference<>() {});
+        this.policyCreateResponse = this.response;
+        captureRequestEvidence("POST", url, body, this.response);
     }
 
     // ==================== WHEN ====================
@@ -513,6 +624,66 @@ public class PolicyDecisionSteps {
         String url = "http://localhost:" + CucumberSpringConfiguration.getPort() + "/v1/admin/policies/" + policyId + "/promote";
         this.response = restTemplate.exchange(url, HttpMethod.POST, entity, new ParameterizedTypeReference<>() {});
         captureRequestEvidence("POST", url, promoteBody, this.response);
+    }
+
+    @When("a promote policy request is sent by principal {string} for the created policy to state {string}")
+    public void sendPromotePolicyByPrincipal(String principal, String targetState) {
+        if (this.policyCreateResponse == null || this.policyCreateResponse.getBody() == null) {
+            throw new IllegalStateException("No created policy to promote");
+        }
+        String policyId = (String) this.policyCreateResponse.getBody().get("policyId");
+        Map<String, Object> promoteBody = new LinkedHashMap<>();
+        promoteBody.put("targetState", targetState);
+        promoteBody.put("approvers", List.of("approver-1", "approver-2"));
+        promoteBody.put("changeRationale", "Test promotion by " + principal);
+        promoteBody.put("rollbackReference", "v1");
+        promoteBody.put("principal", principal);
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        HttpEntity<Map<String, Object>> entity = new HttpEntity<>(promoteBody, headers);
+        String url = "http://localhost:" + CucumberSpringConfiguration.getPort() + "/v1/admin/policies/" + policyId + "/promote";
+        this.response = restTemplate.exchange(url, HttpMethod.POST, entity, new ParameterizedTypeReference<>() {});
+        captureRequestEvidence("POST", url, promoteBody, this.response);
+    }
+
+    @When("the same check permission request is repeated {int} times")
+    public void repeatCheckPermission(int times) {
+        for (int i = 0; i < times; i++) {
+            sendCheckPermissionRequest();
+        }
+    }
+
+    @When("{int} check permission requests are sent via HTTP to open circuit breaker")
+    public void sendMultipleRequestsToOpenCircuit(int count) {
+        for (int i = 0; i < count; i++) {
+            sendCheckPermissionRequest();
+        }
+    }
+
+    @When("response should include circuit breaker {string}")
+    public void verifyCircuitBreakerState(String expectedState) {
+        Map<String, Object> body = this.response.getBody();
+        assertThat(body).isNotNull();
+        String circuitBreakerState = (String) body.get("circuitBreakerState");
+        assertThat(circuitBreakerState).isEqualTo(expectedState);
+        screenCapture.logAssertion("Circuit breaker state", expectedState.equals(circuitBreakerState),
+                expectedState, circuitBreakerState);
+    }
+
+    @When("the health endpoint is queried")
+    public void queryHealthEndpoint() {
+        String url = "http://localhost:" + CucumberSpringConfiguration.getPort() + "/actuator/health";
+        this.response = restTemplate.exchange(url, HttpMethod.GET, null, new ParameterizedTypeReference<>() {});
+        captureRequestEvidence("GET", url, null, this.response);
+    }
+
+    @When("the decision cache TTL is expired")
+    public void expireDecisionCacheTtl() {
+        // Signal cache expiry through runtime context (in a real implementation,
+        // this would call a test-only cache eviction endpoint or set clock forward)
+        this.runtimeContext.put("cacheTtlExpired", "true");
+        screenCapture.log("Simulated decision cache TTL expiry");
     }
 
     @When("a check permission request is sent via HTTP")
@@ -768,6 +939,34 @@ public class PolicyDecisionSteps {
         boolean found = events.stream().anyMatch(event -> expectedEventType.equals(event.get("eventType")));
         assertThat(found).isTrue();
         screenCapture.logAssertion("Audit event: " + expectedEventType, found, "present", found ? "found" : "not found");
+    }
+
+    @Then("the response should include header {string} with value {string}")
+    public void verifyResponseHeader(String headerName, String expectedValue) {
+        HttpHeaders headers = this.response.getHeaders();
+        assertThat(headers).isNotNull();
+        List<String> headerValues = headers.get(headerName);
+        assertThat(headerValues).isNotEmpty();
+        String actualValue = headerValues.get(0);
+        assertThat(actualValue).isEqualTo(expectedValue);
+        screenCapture.logAssertion("Response header: " + headerName, expectedValue.equals(actualValue),
+                expectedValue, actualValue);
+    }
+
+    @Then("the health response should include component {string} with status {string}")
+    public void verifyHealthComponentStatus(String componentName, String expectedStatus) {
+        Map<String, Object> body = this.response.getBody();
+        assertThat(body).isNotNull();
+        @SuppressWarnings("unchecked")
+        Map<String, Object> components = (Map<String, Object>) body.get("components");
+        assertThat(components).isNotNull();
+        @SuppressWarnings("unchecked")
+        Map<String, Object> component = (Map<String, Object>) components.get(componentName);
+        assertThat(component).isNotNull();
+        String actualStatus = (String) component.get("status");
+        assertThat(actualStatus).isEqualTo(expectedStatus);
+        screenCapture.logAssertion("Health component: " + componentName, expectedStatus.equals(actualStatus),
+                expectedStatus, actualStatus);
     }
 
     // ==================== Private Helpers ====================

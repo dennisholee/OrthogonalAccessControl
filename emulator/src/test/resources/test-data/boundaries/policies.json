@@ -1,0 +1,16 @@
+[
+  {
+    "name": "allow-user-cross-boundary",
+    "state": "ACTIVE",
+    "effect": "ALLOW",
+    "action": "*",
+    "resourceType": "*",
+    "subjectId": "user-range",
+    "subjectType": "human",
+    "tenant": "tenant-a",
+    "geography": "us",
+    "market": "retail",
+    "lineOfBusiness": "cards",
+    "channel": "staff"
+  }
+]

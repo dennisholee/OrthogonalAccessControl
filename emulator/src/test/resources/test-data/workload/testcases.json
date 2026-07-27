@@ -1,0 +1,50 @@
+[
+  {
+    "name": "Reporting service workload reads aggregate",
+    "request": {
+      "subject": { "type": "workload", "id": "reporting-service" },
+      "action": "read_aggregate",
+      "resource": { "type": "order", "id": "ORD-789" },
+      "boundaryContext": {
+        "tenant": "acme", "geography": "*", "market": "*", "lineOfBusiness": "*", "channel": "system"
+      }
+    },
+    "expected": "ALLOW"
+  },
+  {
+    "name": "Unauthorized service denied for delete action",
+    "request": {
+      "subject": { "type": "workload", "id": "unauthorized-svc" },
+      "action": "delete",
+      "resource": { "type": "order", "id": "ORD-789" },
+      "boundaryContext": {
+        "tenant": "acme", "geography": "*", "market": "*", "lineOfBusiness": "*", "channel": "system"
+      }
+    },
+    "expected": "DENY"
+  },
+  {
+    "name": "System service reads config via system channel",
+    "request": {
+      "subject": { "type": "workload", "id": "system-service" },
+      "action": "read",
+      "resource": { "type": "config", "id": "global-config" },
+      "boundaryContext": {
+        "tenant": "acme", "geography": "EU", "market": "enterprise", "lineOfBusiness": "platform", "channel": "system"
+      }
+    },
+    "expected": "ALLOW"
+  },
+  {
+    "name": "Human user denied when workload policy exists only",
+    "request": {
+      "subject": { "type": "human", "id": "human-user" },
+      "action": "read_aggregate",
+      "resource": { "type": "order", "id": "ORD-789" },
+      "boundaryContext": {
+        "tenant": "acme", "geography": "EU", "market": "enterprise", "lineOfBusiness": "retail", "channel": "staff"
+      }
+    },
+    "expected": "DENY"
+  }
+]

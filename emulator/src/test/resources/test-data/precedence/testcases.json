@@ -1,0 +1,62 @@
+[
+  {
+    "name": "user-reader reads account acc-1 in correct boundary",
+    "request": {
+      "subject": { "type": "human", "id": "user-reader" },
+      "action": "read",
+      "resource": { "type": "account", "id": "acc-1" },
+      "boundaryContext": {
+        "tenant": "tenant-a", "geography": "us", "market": "retail", "lineOfBusiness": "cards", "channel": "staff"
+      }
+    },
+    "expected": "ALLOW"
+  },
+  {
+    "name": "attacker globally denied (explicit deny wins)",
+    "request": {
+      "subject": { "type": "human", "id": "attacker" },
+      "action": "read",
+      "resource": { "type": "account", "id": "acc-1" },
+      "boundaryContext": {
+        "tenant": "tenant-a", "geography": "us", "market": "retail", "lineOfBusiness": "cards", "channel": "staff"
+      }
+    },
+    "expected": "DENY"
+  },
+  {
+    "name": "unknown-user defaults to deny",
+    "request": {
+      "subject": { "type": "human", "id": "unknown-user" },
+      "action": "read",
+      "resource": { "type": "account", "id": "acc-unknown" },
+      "boundaryContext": {
+        "tenant": "tenant-a", "geography": "us", "market": "retail", "lineOfBusiness": "cards", "channel": "staff"
+      }
+    },
+    "expected": "DENY"
+  },
+  {
+    "name": "user-writer write account (allow matches)",
+    "request": {
+      "subject": { "type": "human", "id": "user-writer" },
+      "action": "write",
+      "resource": { "type": "account", "id": "acc-2" },
+      "boundaryContext": {
+        "tenant": "tenant-a", "geography": "us", "market": "retail", "lineOfBusiness": "cards", "channel": "staff"
+      }
+    },
+    "expected": "ALLOW"
+  },
+  {
+    "name": "user-writer delete account (explicit deny wins)",
+    "request": {
+      "subject": { "type": "human", "id": "user-writer" },
+      "action": "delete",
+      "resource": { "type": "account", "id": "acc-2" },
+      "boundaryContext": {
+        "tenant": "tenant-a", "geography": "us", "market": "retail", "lineOfBusiness": "cards", "channel": "staff"
+      }
+    },
+    "expected": "DENY"
+  }
+]
