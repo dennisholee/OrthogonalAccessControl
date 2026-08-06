@@ -61,6 +61,19 @@ public interface RelationshipGraphPort {
             int maxDepth
     );
 
+    /**
+     * Check if a boundary-scoped relationship exists (Section 4.36 composable domains).
+     * When {@code boundaryScope} is non-null and non-empty, only edges whose
+     * {@code boundaryScope} matches all declared dimensions are traversed.
+     */
+    boolean hasRelationship(
+            String subjectId,
+            String resourceId,
+            String relationshipType,
+            int maxDepth,
+            java.util.Map<String, String> boundaryScope
+    );
+
     /** Maximum traversal depth for ReBAC graph queries (configurable). */
     int getMaxTraversalDepth();
 }

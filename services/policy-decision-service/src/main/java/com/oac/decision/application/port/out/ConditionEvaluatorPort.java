@@ -29,6 +29,17 @@ public interface ConditionEvaluatorPort {
             Map<String, Object> subject,
             Map<String, Object> resource,
             Map<String, Object> environment,
-            String action
-    ) {}
+            String action,
+            Map<String, Object> principalMemberships
+    ) {
+        /** Backward-compatible constructor without principal memberships. */
+        public ConditionEvalContext(
+                Map<String, Object> subject,
+                Map<String, Object> resource,
+                Map<String, Object> environment,
+                String action
+        ) {
+            this(subject, resource, environment, action, Map.of());
+        }
+    }
 }

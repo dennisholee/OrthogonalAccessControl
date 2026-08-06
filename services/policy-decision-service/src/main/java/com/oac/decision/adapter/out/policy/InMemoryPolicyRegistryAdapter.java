@@ -57,6 +57,13 @@ public class InMemoryPolicyRegistryAdapter implements PolicyRegistryPort {
     }
 
     @Override
+    public List<String> findExpiredCertificationPolicies(CheckPermissionRequest request) {
+        // In-memory adapter has no persistent policy documents with certification metadata —
+        // no expired certification to report.
+        return List.of();
+    }
+
+    @Override
     public List<String> findAuthorizedResourceIds(LookupResourcesRequest request) {
         return RESOURCE_GRANTS.stream()
                 .filter(grant -> grant.resourceType().equals(request.resourceType()))

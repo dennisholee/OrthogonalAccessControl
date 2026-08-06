@@ -75,9 +75,11 @@ public class DirectDecisionClient implements DecisionClient {
         HttpServletRequest request = getCurrentRequest();
         if (request == null) return ctx;
 
+        // Subject attributes — the SpEL context resolver maps the subject* key
+        // prefix into subject attributes (subjectDepartment → department).
         String department = request.getHeader("X-Department");
         if (department != null && !department.isBlank()) {
-            ctx.put("department", department);
+            ctx.put("subjectDepartment", department);
         }
 
         String currentHour = request.getHeader("X-Current-Hour");

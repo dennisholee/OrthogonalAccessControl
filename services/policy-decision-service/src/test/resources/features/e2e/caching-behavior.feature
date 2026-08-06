@@ -73,6 +73,7 @@ Feature: Decision Caching — Cache Hits, TTL, Invalidation, and Staleness
     Then the response status should be 200
     And the decision should be "ALLOW" with code "DECISION_POLICY_ALLOW"
     Given a policy document with effect "DENY" and name "POL.RBAC.ACCOUNT.READ.DENY.v1" is saved to MongoDB
+    And the decision cache is invalidated
     When a check permission request is sent via HTTP
     Then the response status should be 200
     And the decision should be "DENY" with code "DECISION_EXPLICIT_DENY"

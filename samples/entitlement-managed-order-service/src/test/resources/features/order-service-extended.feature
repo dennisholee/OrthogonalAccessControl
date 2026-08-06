@@ -100,6 +100,7 @@ Feature: Entitlement-Managed Order Service — Extended Policy Rules
   Scenario: CEO with 3-hop manages chain can read leaf resource
     Given a ReBAC ALLOW policy is seeded for action "read" resource "order"
     And a relationship chain "CEO->VP->Director->CSR:manages" is saved
+    And a relationship edge from "CSR" to "ORD-001" of type "manages" is saved
     And the request header "X-User-Id" is "CEO"
     When a GET request is sent to "/api/orders/ORD-001"
     Then the response status should be 200
@@ -119,7 +120,7 @@ Feature: Entitlement-Managed Order Service — Extended Policy Rules
   # ====================================================================
   @SoD
   Scenario: Requester cannot self-approve transaction
-    Given a SpEL-ALLOW policy is seeded for subject "alice" with condition "subject.id != resource.requester_id"
+    Given a SpEL-ALLOW policy is seeded for subject "alice" with condition "subject.id != resource.requesterId"
     And the request header "X-User-Id" is "alice"
     And the request header "X-Requester-Id" is "alice"
     When a POST request is sent to "/api/orders/ORD-001/approve"
@@ -128,7 +129,7 @@ Feature: Entitlement-Managed Order Service — Extended Policy Rules
 
   @SoD
   Scenario: Different requester and approver succeeds
-    Given a SpEL-ALLOW policy is seeded for subject "bob-manager" with condition "subject.id != resource.requester_id"
+    Given a SpEL-ALLOW policy is seeded for subject "bob-manager" with condition "subject.id != resource.requesterId"
     And the request header "X-User-Id" is "bob-manager"
     And the request header "X-Requester-Id" is "alice"
     When a POST request is sent to "/api/orders/ORD-001/approve"

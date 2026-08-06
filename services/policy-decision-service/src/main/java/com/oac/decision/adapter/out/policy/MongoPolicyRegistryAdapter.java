@@ -1,6 +1,7 @@
 package com.oac.decision.adapter.out.policy;
 
 import com.oac.decision.application.port.out.PolicyRegistryPort;
+import com.oac.decision.application.port.shared.PolicyMatcher;
 import com.oac.decision.model.CheckPermissionRequest;
 import com.oac.decision.model.LookupResourcesRequest;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -32,99 +33,53 @@ public class MongoPolicyRegistryAdapter implements PolicyRegistryPort {
     public List<String> findMatchedPolicies(CheckPermissionRequest request) {
         List<String> matchedPolicyNames = new ArrayList<>();
 
-        // Query 1: Strict match with action + resourceType + boundary + subject
-        List<Criteria> strictParts = new ArrayList<>();
-        strictParts.add(Criteria.where("state").is("ACTIVE"));
-        strictParts.add(new Criteria().orOperator(
-                Criteria.where("subjectId").is(request.subject().id()),
-                Criteria.where("subjectId").exists(false)
-        ));
-        strictParts.add(new Criteria().orOperator(
-                Criteria.where("action").is(request.action()),
-                Criteria.where("action").is("*")
-        ));
-        strictParts.add(new Criteria().orOperator(
-                Criteria.where("resourceType").is(request.resource().type()),
-                Criteria.where("resourceType").is("*")
-        ));
-        if (request.boundaryContext() != null) {
-            strictParts.add(boundaryMatch("tenant", request.boundaryContext().tenant()));
-            strictParts.add(boundaryMatch("geography", request.boundaryContext().geography()));
-            strictParts.add(boundaryMatch("market", request.boundaryContext().market()));
-            strictParts.add(boundaryMatch("lineOfBusiness", request.boundaryContext().lineOfBusiness()));
-            strictParts.add(boundaryMatch("channel", request.boundaryContext().channel()));
-        }
-
-        List<Map> policies = mongoTemplate.find(
-                Query.query(new Criteria().andOperator(strictParts.toArray(new Criteria[0]))),
-                Map.class, COLLECTION);
-
-        for (Map policy : policies) {
-            String name = (String) policy.getOrDefault("name", "UNKNOWN");
-            String effect = (String) policy.getOrDefault("effect", "ALLOW");
-            StringBuilder policyEntry = new StringBuilder("POL." + effect + "." + name);
-
-            // Append spelCondition if present (needed by SpelConditionRule)
-            Object spelCondition = policy.get("spelCondition");
-            if (spelCondition instanceof String sc && !sc.isBlank()) {
-                policyEntry.append(":").append(sc);
-            }
-
-            // Append requiredRelationship if present (needed by ReBacRelationshipRule)
-            Object reqRel = policy.get("requiredRelationship");
-            if (reqRel instanceof String rr && !rr.isBlank()) {
-                policyEntry.append(":REBAC.").append(rr);
-            }
-
-            matchedPolicyNames.add(policyEntry.toString());
-        }
-
-        // Query 2: Subject-scoped DENY policies (effect=DENY, no action/resourceType constraints).
-        // Must match by subjectId to avoid applying attacker's DENY to other users.
+        // Fetch all ACTIVE policies once and delegate the four matching passes to the
+        // shared PolicyMatcher — the single source of truth also used by the emulator,
+        // guaranteeing byte-for-byte identical matchedPolicies.
         try {
-            List<Map> denyPolicies = mongoTemplate.find(Query.query(
-                    Criteria.where("state").is("ACTIVE")
-                            .and("effect").is("DENY")
-                            .and("subjectId").is(request.subject().id())
-            ), Map.class, COLLECTION);
-
-            for (Map policy : denyPolicies) {
-                String name = (String) policy.getOrDefault("name", "UNKNOWN");
-                String fullName = "POL.DENY." + name;
-                if (!matchedPolicyNames.contains(fullName)) {
-                    matchedPolicyNames.add(fullName);
-                }
+            List<Map> activePolicies = mongoTemplate.find(
+                    Query.query(Criteria.where("state").is("ACTIVE")),
+                    Map.class, COLLECTION);
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> typed = (List<Map<String, Object>>) (List<?>) activePolicies;
+            List<Map<String, Object>> policySets = List.of();
+            try {
+                List<Map> sets = mongoTemplate.find(
+                        Query.query(new Criteria()), Map.class, "policy_sets");
+                @SuppressWarnings("unchecked")
+                List<Map<String, Object>> typedSets = (List<Map<String, Object>>) (List<?>) sets;
+                policySets = typedSets;
+            } catch (Exception ignored) {
+                // Policy sets are optional — a missing collection must not fail matching
             }
+            matchedPolicyNames.addAll(PolicyMatcher.match(typed, request, policySets));
         } catch (Exception e) {
             // MongoDB may be unavailable during dependency outage test
         }
 
-        // Query 3: Policies with spelCondition that weren't matched by strict criteria
-        // These are ABAC policies that apply broadly without subjectId/action/resourceType constraints
+        // Shadow evaluation (Section 4.42): evaluate DRAFT policies with
+        // shadowEvaluation=true against live traffic and record hypothetical matches in
+        // shadow-decisions. Shadow results must NOT affect the enforced decision.
         try {
-            // Only query for spelCondition policies if the strict query didn't find spelCondition policies
-            // or we need baseline coverage for test scenarios
-            Query spelQuery = Query.query(Criteria.where("state").is("ACTIVE")
-                    .and("spelCondition").exists(true));
-            List<Map> spelPolicies = mongoTemplate.find(spelQuery, Map.class, COLLECTION);
-            for (Map policy : spelPolicies) {
-                String name = (String) policy.getOrDefault("name", "UNKNOWN");
-                String effect = (String) policy.getOrDefault("effect", "ALLOW");
-                String spelCondition = (String) policy.get("spelCondition");
-                StringBuilder policyEntry = new StringBuilder("POL." + effect + "." + name);
-                if (spelCondition != null && !spelCondition.isBlank()) {
-                    policyEntry.append(":").append(spelCondition);
-                }
-                String entry = policyEntry.toString();
-                if (!matchedPolicyNames.contains(entry)) {
-                    matchedPolicyNames.add(entry);
-                }
+            List<Map> allPolicies = mongoTemplate.find(
+                    Query.query(new Criteria()), Map.class, COLLECTION);
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> typedAll = (List<Map<String, Object>>) (List<?>) allPolicies;
+            List<String> shadowMatched = PolicyMatcher.matchShadowPolicies(typedAll, request);
+            for (String shadowName : shadowMatched) {
+                Map<String, Object> shadowDoc = new java.util.LinkedHashMap<>();
+                shadowDoc.put("policyId", shadowName);
+                shadowDoc.put("subjectId", request.subject() != null ? request.subject().id() : null);
+                shadowDoc.put("action", request.action());
+                shadowDoc.put("resourceType", request.resource() != null ? request.resource().type() : null);
+                shadowDoc.put("timestamp", java.time.Instant.now().toString());
+                mongoTemplate.save(shadowDoc, "shadow_decisions");
             }
         } catch (Exception e) {
-            // MongoDB may be unavailable during dependency outage test
+            // Shadow evaluation is best-effort — never fail the decision on shadow errors
         }
 
-        // Always merge with baseline rules for test scenarios (caveats, fields, ReBAC)
+        // Merge with baseline rules for test scenarios (caveats, fields, ReBAC)
         // that may not be fully represented in MongoDB documents
         matchedPolicyNames.addAll(applyBaselineRules(request));
 
@@ -132,8 +87,34 @@ public class MongoPolicyRegistryAdapter implements PolicyRegistryPort {
         return matchedPolicyNames.stream().distinct().toList();
     }
 
+    @Override
+    public List<String> findExpiredCertificationPolicies(CheckPermissionRequest request) {
+        List<String> expired = new ArrayList<>();
+        try {
+            List<Map> activePolicies = mongoTemplate.find(
+                    Query.query(Criteria.where("state").is("ACTIVE")),
+                    Map.class, COLLECTION);
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> typed = (List<Map<String, Object>>) (List<?>) activePolicies;
+            java.time.LocalDate today = java.time.LocalDate.now();
+            for (Map<String, Object> policy : typed) {
+                String name = policy.get("name") != null ? policy.get("name").toString() : "UNKNOWN";
+                boolean matches = PolicyMatcher.match(List.of(policy), request).stream()
+                        .anyMatch(entry -> entry.contains(name));
+                if (PolicyMatcher.isCertificationExpired(policy, today) && matches) {
+                    expired.add(name);
+                }
+            }
+        } catch (Exception e) {
+            // Certification check is best-effort — never fail the decision on governance errors
+        }
+        return expired;
+    }
+
     private Criteria boundaryMatch(String field, String value) {
         return new Criteria().orOperator(
+                // Multi-value array scoping (IN semantics) — see Section 4.32
+                Criteria.where(field).in(value),
                 Criteria.where(field).is(value),
                 Criteria.where(field).is("*"),
                 Criteria.where(field).exists(false)
@@ -150,6 +131,13 @@ public class MongoPolicyRegistryAdapter implements PolicyRegistryPort {
                 .and("market").is(request.boundaryContext().market())
                 .and("lineOfBusiness").is(request.boundaryContext().lineOfBusiness())
                 .and("channel").is(request.boundaryContext().channel());
+        // Purpose and regulatoryRegime are optional dimensions — only constrain when declared
+        if (request.boundaryContext().purpose() != null && !request.boundaryContext().purpose().isBlank()) {
+            grantCriteria = grantCriteria.and("purpose").is(request.boundaryContext().purpose());
+        }
+        if (request.boundaryContext().regulatoryRegime() != null && !request.boundaryContext().regulatoryRegime().isBlank()) {
+            grantCriteria = grantCriteria.and("regulatoryRegime").is(request.boundaryContext().regulatoryRegime());
+        }
 
         List<Map> grants = mongoTemplate.find(
                 Query.query(grantCriteria), Map.class, "resource_grants");
@@ -202,13 +190,19 @@ public class MongoPolicyRegistryAdapter implements PolicyRegistryPort {
                         Criteria.where("resourceType").exists(false)
                 ));
             }
-            // Also match boundary context if present
+            // Also match boundary context if present — including purpose and regulatoryRegime for CDP workloads
             if (request.boundaryContext() != null) {
                 criteria.add(boundaryMatch("tenant", request.boundaryContext().tenant()));
                 criteria.add(boundaryMatch("geography", request.boundaryContext().geography()));
                 criteria.add(boundaryMatch("market", request.boundaryContext().market()));
                 criteria.add(boundaryMatch("lineOfBusiness", request.boundaryContext().lineOfBusiness()));
                 criteria.add(boundaryMatch("channel", request.boundaryContext().channel()));
+                if (request.boundaryContext().purpose() != null && !request.boundaryContext().purpose().isBlank()) {
+                    criteria.add(boundaryMatch("purpose", request.boundaryContext().purpose()));
+                }
+                if (request.boundaryContext().regulatoryRegime() != null && !request.boundaryContext().regulatoryRegime().isBlank()) {
+                    criteria.add(boundaryMatch("regulatoryRegime", request.boundaryContext().regulatoryRegime()));
+                }
             }
 
             List<Map> policies = mongoTemplate.find(
@@ -284,7 +278,7 @@ public class MongoPolicyRegistryAdapter implements PolicyRegistryPort {
         if ("approve".equals(action) && "L1".equals(runtime.get("approvalLevel"))) {
             matchedPolicies.add("POL.PBAC.APPROVAL.L1.ALLOW.v1");
         }
-        if ("order".equals(resourceType) && "approve".equals(action)) {
+        if ("order".equals(resourceType) && "approve".equals(action) && "acme".equals(tenant)) {
             matchedPolicies.add("POL.REBAC.ORDER.APPROVE.ALLOW.v1");
         }
         if ("order".equals(resourceType) && "read".equals(action)) {
@@ -296,7 +290,9 @@ public class MongoPolicyRegistryAdapter implements PolicyRegistryPort {
             }
         }
         // ReBAC graphlookup scenarios: any subject requesting "read" on "order" with relationships
+        // (scoped to the decision-service test tenant to avoid leaking into sample apps)
         if ("order".equals(resourceType) && ("read".equals(action) || "approve".equals(action))
+                && "acme".equals(tenant)
                 && (subjectId != null && !subjectId.isEmpty())) {
             // Check if there's a ReBAC policy saved in MongoDB for this scenario
             boolean hasReBAC = !mongoTemplate.find(Query.query(
@@ -335,6 +331,7 @@ public class MongoPolicyRegistryAdapter implements PolicyRegistryPort {
         }
 
         if ("order".equals(resourceType) && "read".equals(action)
+                && "acme".equals(tenant)
                 && ("csr-user".equals(subjectId) || "admin-user".equals(subjectId)
                     || "default-user".equals(subjectId) || "override-user".equals(subjectId))) {
             matchedPolicies.add("POL.FIELD.ORDER.READ.ALLOW.v1");

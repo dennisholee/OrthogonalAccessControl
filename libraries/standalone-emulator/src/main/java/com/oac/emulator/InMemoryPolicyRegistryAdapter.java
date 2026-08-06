@@ -1,6 +1,7 @@
 package com.oac.emulator;
 
 import com.oac.decision.application.port.out.PolicyRegistryPort;
+import com.oac.decision.application.port.shared.PolicyMatcher;
 import com.oac.decision.model.CheckPermissionRequest;
 import com.oac.decision.model.LookupResourcesRequest;
 
@@ -8,7 +9,6 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 /**
  * In-memory replacement for {@code MongoPolicyRegistryAdapter}.
@@ -21,11 +21,17 @@ import java.util.stream.Collectors;
 public class InMemoryPolicyRegistryAdapter implements PolicyRegistryPort {
 
     private final List<Map<String, Object>> policies;
+    private List<Map<String, Object>> policySets = new ArrayList<>();
     private String activeVersion;
 
     public InMemoryPolicyRegistryAdapter(List<Map<String, Object>> policies) {
         this.policies = new ArrayList<>(policies);
         this.activeVersion = "v0";
+    }
+
+    /** Set Policy Set documents (Section 4.2) evaluated via the shared matcher. */
+    public void setPolicySets(List<Map<String, Object>> policySets) {
+        this.policySets = policySets != null ? new ArrayList<>(policySets) : new ArrayList<>();
     }
 
     /** Set active version string (returned by {@link #getActiveVersion()}). */
@@ -35,53 +41,27 @@ public class InMemoryPolicyRegistryAdapter implements PolicyRegistryPort {
 
     @Override
     public List<String> findMatchedPolicies(CheckPermissionRequest request) {
-        List<String> matched = new ArrayList<>();
+        // Delegate to the shared PolicyMatcher — the single source of truth also used by
+        // MongoPolicyRegistryAdapter, guaranteeing byte-for-byte identical matchedPolicies.
+        return PolicyMatcher.match(policies, request, policySets);
+    }
 
-        // Query 1: Strict match with action + resourceType + boundary + subject
-        var subjectId = request.subject().id();
-        var action = request.action();
-        var resourceType = request.resource().type();
-        var boundary = request.boundaryContext();
-
+    @Override
+    public List<String> findExpiredCertificationPolicies(CheckPermissionRequest request) {
+        // Same governance check as MongoPolicyRegistryAdapter — shared PolicyMatcher logic.
+        java.time.LocalDate today = java.time.LocalDate.now();
+        List<String> expired = new ArrayList<>();
         for (Map<String, Object> policy : policies) {
             if (!"ACTIVE".equals(policy.get("state"))) continue;
-
-            // Subject match: policy subjectId matches request, or policy has no subjectId constraint
-            Object policySubject = policy.get("subjectId");
-            if (policySubject != null && !policySubject.toString().equals(subjectId)) continue;
-
-            // Action match
-            Object policyAction = policy.get("action");
-            if (policyAction != null && !"*".equals(policyAction.toString()) && !policyAction.toString().equals(action)) continue;
-
-            // Resource type match
-            Object policyResType = policy.get("resourceType");
-            if (policyResType != null && !"*".equals(policyResType.toString()) && !policyResType.toString().equals(resourceType)) continue;
-
-            // Boundary match (allowing "*" or absent)
-            if (boundary != null && !matchesBoundary(policy, boundary)) continue;
-
-            // Build matched policy entry with optional condition suffixes
-            String effect = str(policy, "effect", "ALLOW");
-            String name = str(policy, "name", "UNKNOWN");
-            StringBuilder entry = new StringBuilder("POL." + effect + "." + name);
-
-            // Append spelCondition for SpelConditionRule
-            Object spel = policy.get("spelCondition");
-            if (spel instanceof String sc && !sc.isBlank()) {
-                entry.append(":").append(sc);
+            if (!PolicyMatcher.isCertificationExpired(policy, today)) continue;
+            String name = policy.get("name") != null ? policy.get("name").toString() : "UNKNOWN";
+            boolean matches = PolicyMatcher.match(List.of(policy), request).stream()
+                    .anyMatch(entry -> entry.contains(name));
+            if (matches) {
+                expired.add(name);
             }
-
-            // Append requiredRelationship for ReBacRelationshipRule
-            Object rel = policy.get("requiredRelationship");
-            if (rel instanceof String rr && !rr.isBlank()) {
-                entry.append(":REBAC.").append(rr);
-            }
-
-            matched.add(entry.toString());
         }
-
-        return matched.stream().distinct().collect(Collectors.toList());
+        return expired;
     }
 
     @Override
@@ -122,25 +102,5 @@ public class InMemoryPolicyRegistryAdapter implements PolicyRegistryPort {
             result.add(Map.of("field", entry.getKey(), "level", entry.getValue()));
         }
         return result;
-    }
-
-    private boolean matchesBoundary(Map<String, Object> policy, com.oac.decision.model.BoundaryContext boundary) {
-        return matchesField(policy, "tenant", boundary.tenant())
-                && matchesField(policy, "geography", boundary.geography())
-                && matchesField(policy, "market", boundary.market())
-                && matchesField(policy, "lineOfBusiness", boundary.lineOfBusiness())
-                && matchesField(policy, "channel", boundary.channel());
-    }
-
-    private boolean matchesField(Map<String, Object> policy, String field, String requestValue) {
-        Object policyValue = policy.get(field);
-        if (policyValue == null) return true; // absent field matches all
-        String pv = policyValue.toString();
-        return "*".equals(pv) || pv.equals(requestValue);
-    }
-
-    private static String str(Map<String, Object> map, String key, String defaultVal) {
-        Object v = map.get(key);
-        return v != null ? v.toString() : defaultVal;
     }
 }

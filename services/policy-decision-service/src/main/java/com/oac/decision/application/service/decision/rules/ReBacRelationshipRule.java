@@ -5,6 +5,7 @@ import com.oac.decision.application.service.decision.DecisionContext;
 import com.oac.decision.application.service.decision.DecisionOutcome;
 import com.oac.decision.application.service.decision.DecisionRule;
 
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -32,9 +33,10 @@ public class ReBacRelationshipRule implements DecisionRule {
         String subjectId = request.subject().id();
         String resourceId = request.resource().id();
 
-        // Extract relationship type from matched policies. If found, use it to
-        // filter the direct edge check from traversed nodes to the target resource.
+        // Extract relationship type and boundary scope from matched policies.
+        // Format: POL.ALLOW.<name>:REBAC.<type>:SCOPE.market=retail,lob=cards
         String relationshipType = null;
+        Map<String, String> relationshipBoundaryScope = new java.util.LinkedHashMap<>();
         for (String policy : context.matchedPolicies()) {
             if (!policy.contains("REBAC") && !policy.contains("RELATIONSHIP")) continue;
             int idx = policy.lastIndexOf(":REBAC.");
@@ -47,6 +49,23 @@ public class ReBacRelationshipRule implements DecisionRule {
                 if (!extracted.isEmpty()) {
                     relationshipType = extracted;
                     break;
+                }
+            }
+        }
+        // Extract :SCOPE.<k>=<v>,<k>=<v> segment from the matched policy entry.
+        for (String policy : context.matchedPolicies()) {
+            int scopeIdx = policy.lastIndexOf(":SCOPE.");
+            if (scopeIdx >= 0) {
+                String scopePart = policy.substring(scopeIdx + ":SCOPE.".length());
+                int end = scopePart.indexOf(':');
+                if (end > 0) scopePart = scopePart.substring(0, end);
+                for (String pair : scopePart.split(",")) {
+                    int eq = pair.indexOf('=');
+                    if (eq > 0) {
+                        relationshipBoundaryScope.put(
+                                pair.substring(0, eq).trim(),
+                                pair.substring(eq + 1).trim());
+                    }
                 }
             }
         }
@@ -79,6 +98,23 @@ public class ReBacRelationshipRule implements DecisionRule {
                         "DENY",
                         "DECISION_REBAC_NO_RELATIONSHIP",
                         "evidence://decision/rebac/no-relationship-type"
+                ));
+            }
+        }
+
+        // If the policy declares a relationshipBoundaryScope (Section 4.36 composable domains),
+        // verify that a scoped path exists — the unscoped traversal above is not sufficient.
+        if (!relationshipBoundaryScope.isEmpty()) {
+            hasRelationship = relationshipGraphPort.hasRelationship(
+                    subjectId, resourceId, relationshipType,
+                    relationshipGraphPort.getMaxTraversalDepth(),
+                    relationshipBoundaryScope
+            );
+            if (!hasRelationship) {
+                return Optional.of(new DecisionOutcome(
+                        "DENY",
+                        "DECISION_REBAC_NO_RELATIONSHIP",
+                        "evidence://decision/rebac/no-relationship-scope"
                 ));
             }
         }

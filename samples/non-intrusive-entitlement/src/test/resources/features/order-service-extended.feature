@@ -34,6 +34,7 @@ Feature: Non-Intrusive Entitlement — Extended Policy Rules
   @Caveats
   Scenario: Time-window caveat blocks access outside business hours
     Given the request header "X-User-Id" is "csr-user"
+    And the request header "X-Department" is "compliance"
     And the request header "X-Current-Hour" is "03"
     When a GET request is sent to "/api/orders/ORD-001"
     Then the response status should be 200

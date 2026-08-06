@@ -175,13 +175,21 @@ public class DemoDataSeeder {
         )), "policies");
         log.info("Seeded time-window policy for csr-user");
 
-        // Policy 9: Break-glass for emergency access
+        // Policy 9: Break-glass for emergency access — deliberately NOT scoped to
+        // Break-glass policy: typed BREAK_GLASS, action/resourceType scoped so it matches
+        // via PolicyMatcher only when breakGlassActive=true (Section 4.5 typed break-glass).
+        // Effective window is ≤24h per the Section 4.5 hard limit.
+        java.time.Instant bgFrom = java.time.Instant.now().minus(1, java.time.temporal.ChronoUnit.HOURS);
+        java.time.Instant bgUntil = java.time.Instant.now().plus(23, java.time.temporal.ChronoUnit.HOURS);
         mongoTemplate.save(new Document(map(
                 "name", "POL.BREAK.GLASS.v1",
                 "effect", "ALLOW",
                 "state", "ACTIVE",
+                "policyType", "BREAK_GLASS",
                 "action", "read",
                 "resourceType", "order",
+                "effectiveFrom", bgFrom.toString(),
+                "effectiveUntil", bgUntil.toString(),
                 "tenant", "acme-corp",
                 "geography", "global",
                 "market", "enterprise",
@@ -206,11 +214,13 @@ public class DemoDataSeeder {
         )), "policies");
         log.info("Seeded tenant-scoped policy for csr-user (tenant-a)");
 
-        // Policy 11: ReBAC ALLOW for READ (hierarchical)
+        // Policy 11: ReBAC ALLOW for READ (hierarchical) — scoped to the CEO hierarchy,
+        // so it never leaks to csr-user/break-glass/admin who have their own policies.
         mongoTemplate.save(new Document(map(
                 "name", "POL.REBAC.READ.ORDER.v1",
                 "effect", "ALLOW",
                 "state", "ACTIVE",
+                "subjectId", "CEO",
                 "action", "read",
                 "resourceType", "order",
                 "requiredRelationship", "manages",
@@ -220,7 +230,7 @@ public class DemoDataSeeder {
                 "lineOfBusiness", "ecommerce",
                 "channel", "staff"
         )), "policies");
-        log.info("Seeded ReBAC ALLOW policy for read");
+        log.info("Seeded ReBAC ALLOW policy for read (CEO hierarchy)");
 
         // Policy 12: SoD — self-approval prevention
         mongoTemplate.save(new Document(map(
@@ -234,9 +244,22 @@ public class DemoDataSeeder {
                 "market", "enterprise",
                 "lineOfBusiness", "ecommerce",
                 "channel", "staff",
-                "spelCondition", "subject.id != resource.requester_id"
+                "spelCondition", "subject.id != resource.requesterId"
         )), "policies");
         log.info("Seeded SoD SpEL policy for approve (subject.id != requester)");
+
+        // Policy 13: Explicit DENY for alice approve — alice holds an "approver" edge
+        // which does not satisfy the "manages" policy, so her approve attempts are denied.
+        mongoTemplate.save(new Document(map(
+                "name", "POL.DENY.ALICE.APPROVE.v1",
+                "effect", "DENY",
+                "state", "ACTIVE",
+                "subjectId", "alice",
+                "action", "approve",
+                "resourceType", "order",
+                "tenant", "acme-corp"
+        )), "policies");
+        log.info("Seeded DENY policy for alice approve (approver edge ≠ manages policy)");
     }
 
     // ----------------------------------------------------------------

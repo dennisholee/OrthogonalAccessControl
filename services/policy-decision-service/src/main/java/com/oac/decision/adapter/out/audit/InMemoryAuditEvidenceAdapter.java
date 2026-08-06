@@ -18,6 +18,11 @@ public class InMemoryAuditEvidenceAdapter implements AuditEvidencePort {
         events.add(event);
     }
 
+    /** Clears all accumulated events (used between test scenarios). */
+    public void clear() {
+        events.clear();
+    }
+
     @Override
     public List<AuditEventRecord> findByEntityId(String entityId) {
         return events.stream()

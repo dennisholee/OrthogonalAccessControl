@@ -44,6 +44,8 @@ public class PolicySpec {
     private final String market;
     private final String lineOfBusiness;
     private final String channel;
+    private final String purpose;
+    private final String regulatoryRegime;
     private final List<PolicyCondition> conditions;
 
     private PolicySpec(Builder builder) {
@@ -60,6 +62,8 @@ public class PolicySpec {
         this.market = builder.market;
         this.lineOfBusiness = builder.lineOfBusiness;
         this.channel = builder.channel;
+        this.purpose = builder.purpose;
+        this.regulatoryRegime = builder.regulatoryRegime;
         this.conditions = Collections.unmodifiableList(new ArrayList<>(builder.conditions));
     }
 
@@ -77,6 +81,8 @@ public class PolicySpec {
     public String market() { return market; }
     public String lineOfBusiness() { return lineOfBusiness; }
     public String channel() { return channel; }
+    public String purpose() { return purpose; }
+    public String regulatoryRegime() { return regulatoryRegime; }
     public List<PolicyCondition> conditions() { return conditions; }
 
     /**
@@ -103,6 +109,9 @@ public class PolicySpec {
             if (channel != null) bc.put("channel", channel);
             doc.put("boundaryContext", bc);
         }
+        // Purpose and regulatoryRegime are top-level boundary fields on the policy document
+        if (purpose != null) doc.put("purpose", purpose);
+        if (regulatoryRegime != null) doc.put("regulatoryRegime", regulatoryRegime);
         // Write conditions as an array of typed objects
         if (!conditions.isEmpty()) {
             List<java.util.Map<String, Object>> condList = new ArrayList<>();
@@ -135,6 +144,8 @@ public class PolicySpec {
         private String market;
         private String lineOfBusiness;
         private String channel;
+        private String purpose;
+        private String regulatoryRegime;
         private final List<PolicyCondition> conditions = new ArrayList<>();
 
         public Builder name(String name) { this.name = name; return this; }
@@ -163,7 +174,19 @@ public class PolicySpec {
                 this.market = bc.market();
                 this.lineOfBusiness = bc.lineOfBusiness();
                 this.channel = bc.channel();
+                this.purpose = bc.purpose();
+                this.regulatoryRegime = bc.regulatoryRegime();
             }
+            return this;
+        }
+
+        public Builder purpose(String purpose) {
+            this.purpose = purpose;
+            return this;
+        }
+
+        public Builder regulatoryRegime(String regulatoryRegime) {
+            this.regulatoryRegime = regulatoryRegime;
             return this;
         }
 

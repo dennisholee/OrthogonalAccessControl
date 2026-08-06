@@ -6,6 +6,7 @@ public enum PolicyState {
     APPROVED,
     STAGED,
     ACTIVE,
+    ARCHIVED,
     DEPRECATED,
     RETIRED
 }

@@ -4,6 +4,7 @@ import com.oac.decision.model.AttributeAccessLevel;
 import com.oac.decision.model.AttributeAccessMap;
 
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * Evaluates caveats attached to ALLOW policies. Caveats can:
@@ -20,6 +21,19 @@ public interface CaveatEvaluator {
      * @return true if the caveat passes, false if it should narrow to DENY
      */
     boolean evaluate(DecisionContext context, Map<String, Object> caveatParams);
+
+    /**
+     * Optional domain-specific decision code for a caveat failure. When a caveat
+     * fails and this returns a value, {@code AllowRule} uses it instead of the
+     * generic {@code DECISION_CAVEAT_FAILED} — enabling codes such as
+     * {@code DECISION_EXPORT_RESTRICTED},
+     * {@code DECISION_CROSS_BORDER_TRANSFER_BLOCKED} and
+     * {@code DECISION_AGGREGATION_REQUIRED}.
+     */
+    default Optional<String> failureDecisionCode(
+            DecisionContext context, Map<String, Object> caveatParams) {
+        return Optional.empty();
+    }
 
     /**
      * Compute attribute-level access constraints based on this caveat.

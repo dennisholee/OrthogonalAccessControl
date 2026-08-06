@@ -1,6 +1,7 @@
 package com.oac.emulator;
 
 import com.oac.decision.application.port.out.RelationshipGraphPort;
+import com.oac.decision.application.port.shared.RelationshipBfsEvaluator;
 import com.oac.decision.model.CheckPermissionRequest;
 import com.oac.decision.model.RelationshipEdge;
 
@@ -30,6 +31,10 @@ public class InMemoryRelationshipGraphAdapter implements RelationshipGraphPort {
     public InMemoryRelationshipGraphAdapter(List<Map<String, Object>> relationships) {
         if (relationships != null) {
             for (Map<String, Object> rel : relationships) {
+                Object scope = rel.get("boundaryScope");
+                @SuppressWarnings("unchecked")
+                Map<String, Object> boundaryScope = scope instanceof Map<?, ?> m
+                        ? (Map<String, Object>) m : null;
                 var edge = new Edge(
                         nextId(),
                         str(rel, "subjectId"),
@@ -37,7 +42,8 @@ public class InMemoryRelationshipGraphAdapter implements RelationshipGraphPort {
                         str(rel, "relationshipType"),
                         str(rel, "resourceId"),
                         str(rel, "resourceType"),
-                        str(rel, "expiresAt")
+                        str(rel, "expiresAt"),
+                        boundaryScope
                 );
                 edgesById.put(edge.id, edge);
                 adjacencyList.computeIfAbsent(edge.subjectId, k -> new ArrayList<>()).add(edge);
@@ -123,47 +129,42 @@ public class InMemoryRelationshipGraphAdapter implements RelationshipGraphPort {
     @Override
     public boolean hasRelationship(String subjectId, String resourceId, String relationshipType, int maxDepth) {
         if (maxDepth <= 0) maxDepth = this.maxDepth;
-        Set<String> visited = new HashSet<>();
-        ArrayDeque<BfsNode> queue = new ArrayDeque<>();
-        queue.add(new BfsNode(subjectId, "subject", 0));
+        // Delegate to the shared RelationshipBfsEvaluator — the same single source of truth
+        // used by MongoRelationshipGraphAdapter, guaranteeing identical traversal.
+        return RelationshipBfsEvaluator.hasRelationship(allEdgeMaps(), subjectId, resourceId, relationshipType, maxDepth);
+    }
 
-        while (!queue.isEmpty()) {
-            BfsNode current = queue.pollFirst();
-            if (current.depth > maxDepth) continue;
-            if (!visited.add(current.type + ":" + current.id)) continue;
+    @Override
+    public boolean hasRelationship(String subjectId, String resourceId, String relationshipType, int maxDepth,
+                                   Map<String, String> boundaryScope) {
+        if (maxDepth <= 0) maxDepth = this.maxDepth;
+        return RelationshipBfsEvaluator.hasRelationship(
+                allEdgeMaps(), subjectId, resourceId, relationshipType, maxDepth, boundaryScope);
+    }
 
-            // From ANY node (subject or resource), check outgoing edges
-            // Outgoing edges go from subject → resource
-            List<Edge> outEdges = adjacencyList.getOrDefault(current.id, List.of());
-            for (Edge edge : outEdges) {
-                if (isExpired(edge.expiresAt)) continue;
-                if (edge.resourceId.equals(resourceId)) {
-                    // Found edge TO the target resource. Check type constraint.
-                    if (relationshipType == null || relationshipType.equals(edge.relationshipType)) {
-                        return true;
-                    }
-                }
-                // Traverse to resource node for further exploration
-                queue.add(new BfsNode(edge.resourceId, "resource", current.depth + 1));
+    /** All stored edges as Map documents, the shared evaluator's input contract. */
+    private List<Map<String, Object>> allEdgeMaps() {
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Edge edge : edgesById.values()) {
+            Map<String, Object> map = new LinkedHashMap<>();
+            map.put("subjectId", edge.subjectId);
+            map.put("subjectType", edge.subjectType);
+            map.put("relationshipType", edge.relationshipType);
+            map.put("resourceId", edge.resourceId);
+            map.put("resourceType", edge.resourceType);
+            map.put("expiresAt", edge.expiresAt);
+            if (edge.boundaryScope != null && !edge.boundaryScope.isEmpty()) {
+                map.put("boundaryScope", edge.boundaryScope);
             }
-            // From a resource node, also traverse reverse edges to find subjects
-            // that point to this resource (since the entity can be both resource AND subject)
-            if ("resource".equals(current.type)) {
-                List<Edge> incomingEdges = reverseAdjacency.getOrDefault(current.id, List.of());
-                for (Edge edge : incomingEdges) {
-                    if (isExpired(edge.expiresAt)) continue;
-                    if (edge.subjectId.equals(resourceId)) continue;
-                    queue.add(new BfsNode(edge.subjectId, "subject", current.depth + 1));
-                }
-            }
+            result.add(map);
         }
-        return false;
+        return result;
     }
 
     @Override
     public String createRelationship(RelationshipEdge edge) {
         var stored = new Edge(nextId(), edge.subjectId(), edge.subjectType(),
-                edge.relationshipType(), edge.resourceId(), edge.resourceType(), null);
+                edge.relationshipType(), edge.resourceId(), edge.resourceType(), null, null);
         edgesById.put(stored.id, stored);
         adjacencyList.computeIfAbsent(stored.subjectId, k -> new ArrayList<>()).add(stored);
         reverseAdjacency.computeIfAbsent(stored.resourceId, k -> new ArrayList<>()).add(stored);
@@ -198,11 +199,14 @@ public class InMemoryRelationshipGraphAdapter implements RelationshipGraphPort {
     /** Internal edge data class. */
     private static class Edge {
         final String id, subjectId, subjectType, relationshipType, resourceId, resourceType, expiresAt;
+        final Map<String, Object> boundaryScope;
         Edge(String id, String subjectId, String subjectType, String relationshipType,
-             String resourceId, String resourceType, String expiresAt) {
+             String resourceId, String resourceType, String expiresAt,
+             Map<String, Object> boundaryScope) {
             this.id = id; this.subjectId = subjectId; this.subjectType = subjectType;
             this.relationshipType = relationshipType; this.resourceId = resourceId;
             this.resourceType = resourceType; this.expiresAt = expiresAt;
+            this.boundaryScope = boundaryScope;
         }
     }
 

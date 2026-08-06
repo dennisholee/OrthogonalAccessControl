@@ -6,7 +6,10 @@ import com.oac.decision.adapter.out.expression.SpelConditionEvaluatorAdapter;
 import com.oac.decision.adapter.out.observability.MetricsObservabilityAdapter;
 import com.oac.decision.adapter.out.policy.ClasspathFailOpenEndpointPolicyAdapter;
 import com.oac.decision.application.port.out.*;
+import com.oac.decision.adapter.out.schema.DefaultAttributeSchemaRegistryStub;
 import com.oac.decision.application.service.DecisionApplicationService;
+import com.oac.decision.application.service.decision.CircuitBreaker;
+import com.oac.decision.application.service.decision.DecisionCache;
 import com.oac.decision.application.port.in.DecisionQueryUseCase;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -50,6 +53,7 @@ public class StandaloneEmulatorConfiguration {
         FailOpenEndpointPolicyPort failOpenPolicy = new ClasspathFailOpenEndpointPolicyAdapter();
         ConditionEvaluatorPort conditionEvaluator = new SpelConditionEvaluatorAdapter();
         ConsistencyTokenStore consistencyTokenStore = new InMemoryConsistencyTokenAdapter();
+        ControllerPurposeRegistryPort controllerPurposeRegistry = new InMemoryControllerPurposeRegistryAdapter();
 
         return new DecisionApplicationService(
                 policyRegistry,
@@ -59,7 +63,11 @@ public class StandaloneEmulatorConfiguration {
                 failOpenPolicy,
                 relationshipGraph,
                 conditionEvaluator,
-                consistencyTokenStore
+                consistencyTokenStore,
+                new CircuitBreaker(),
+                new DecisionCache(),
+                controllerPurposeRegistry,
+                new DefaultAttributeSchemaRegistryStub()
         );
     }
 

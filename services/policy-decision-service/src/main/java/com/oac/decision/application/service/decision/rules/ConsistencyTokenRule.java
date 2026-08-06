@@ -4,12 +4,45 @@ import com.oac.decision.application.service.decision.DecisionContext;
 import com.oac.decision.application.service.decision.DecisionOutcome;
 import com.oac.decision.application.service.decision.DecisionRule;
 
+import java.util.Map;
 import java.util.Optional;
 
 public class ConsistencyTokenRule implements DecisionRule {
 
     @Override
     public Optional<DecisionOutcome> evaluate(DecisionContext context) {
+        // Per-scope token vector (Section 4.6 consistency token partitioning):
+        // when the resolved context carries a map of required tokens per scope, compare
+        // each scope independently against the request's token vector.
+        @SuppressWarnings("unchecked")
+        Map<String, String> requiredByScope = (Map<String, String>) context.resolvedRuntimeContext()
+                .get("requiredConsistencyTokens");
+        if (requiredByScope != null && !requiredByScope.isEmpty()) {
+            Map<String, String> requestByScope = context.request().consistencyTokens();
+            if (requestByScope == null || requestByScope.isEmpty()) {
+                return Optional.of(new DecisionOutcome(
+                        "DENY",
+                        "DECISION_CONSISTENCY_TOKEN_REQUIRED",
+                        "evidence://decision/consistency-token-required"
+                ));
+            }
+            for (Map.Entry<String, String> entry : requiredByScope.entrySet()) {
+                String scope = entry.getKey();
+                String required = entry.getValue();
+                if (required == null || required.isBlank()) continue;
+                String requestToken = requestByScope.get(scope);
+                if (requestToken == null || requestToken.isBlank() || !requestToken.equals(required)) {
+                    return Optional.of(new DecisionOutcome(
+                            "DENY",
+                            "CONSISTENCY_VIOLATION",
+                            "evidence://decision/consistency-token-stale/" + scope
+                    ));
+                }
+            }
+            return Optional.empty();
+        }
+
+        // Legacy single-token logic
         String requestToken = context.request().consistencyToken();
         Object requiredToken = context.resolvedRuntimeContext().get("requiredConsistencyToken");
 

@@ -7,11 +7,12 @@ Feature: Break-Glass Emergency Access — Time-Bounded Override
 
   Background:
     Given the policy decision service is running on a random port
-    And MongoDB is seeded with baseline fixtures
 
   @CriticalPath
   Scenario: Break-glass activation grants temporary access
-    Given a policy document with effect "ALLOW" and name "POL.BREAK.GLASS.ADMIN.v1" is saved to MongoDB
+    Given a policy document with effect "ALLOW" and name "POL.BREAK.GLASS.ADMIN.v1" for action "delete" and resource type "order" is saved to MongoDB
+    And the policy has policyType "BREAK_GLASS"
+    And the policy has effectiveWindow from now minus 1 hours to now plus 23 hours
     Given a subject "human" with id "break-glass-operator"
     And an action "delete"
     And a resource type "order" with id "ORD-CRITICAL"
@@ -24,7 +25,9 @@ Feature: Break-Glass Emergency Access — Time-Bounded Override
 
   @CriticalPath
   Scenario: Break-glass without active flag returns DENY
-    Given a policy document with effect "ALLOW" and name "POL.BREAK.GLASS.ADMIN.v1" is saved to MongoDB
+    Given a policy document with effect "ALLOW" and name "POL.BREAK.GLASS.ADMIN.v1" for action "delete" and resource type "order" is saved to MongoDB
+    And the policy has policyType "BREAK_GLASS"
+    And the policy has effectiveWindow from now minus 1 hours to now plus 23 hours
     Given a subject "human" with id "break-glass-operator"
     And an action "delete"
     And a resource type "order" with id "ORD-CRITICAL"

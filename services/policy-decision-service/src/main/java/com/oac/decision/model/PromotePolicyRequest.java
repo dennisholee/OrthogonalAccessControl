@@ -13,6 +13,20 @@ public record PromotePolicyRequest(
         String changeRationale,
         String rollbackReference,
         String consistencyToken,
-        String idempotencyKey
+        String idempotencyKey,
+        String principal
 ) {
+    public PromotePolicyRequest(
+            PolicyState targetState,
+            List<String> approvers,
+            List<String> approverRoles,
+            Integer simulationCoverage,
+            String changeRationale,
+            String rollbackReference,
+            String consistencyToken,
+            String idempotencyKey
+    ) {
+        this(targetState, approvers, approverRoles, simulationCoverage, changeRationale,
+                rollbackReference, consistencyToken, idempotencyKey, null);
+    }
 }

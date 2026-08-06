@@ -4,15 +4,19 @@ import com.oac.decision.adapter.out.consistency.MongoConsistencyTokenAdapter;
 import com.oac.decision.application.port.in.DecisionQueryUseCase;
 import com.oac.decision.application.port.in.PolicyAdministrationUseCase;
 import com.oac.decision.application.port.out.AttributeResolverPort;
+import com.oac.decision.application.port.out.AttributeSchemaRegistryPort;
 import com.oac.decision.application.port.out.AuditEvidencePort;
 import com.oac.decision.application.port.out.ConditionEvaluatorPort;
 import com.oac.decision.application.port.out.ConsistencyTokenStore;
+import com.oac.decision.application.port.out.ControllerPurposeRegistryPort;
 import com.oac.decision.application.port.out.FailOpenEndpointPolicyPort;
 import com.oac.decision.application.port.out.ObservabilityPort;
 import com.oac.decision.application.port.out.PolicyRegistryPort;
 import com.oac.decision.application.port.out.RelationshipGraphPort;
 import com.oac.decision.application.service.DecisionApplicationService;
 import com.oac.decision.application.service.PolicyAdministrationService;
+import com.oac.decision.application.service.decision.CircuitBreaker;
+import com.oac.decision.application.service.decision.DecisionCache;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -29,7 +33,11 @@ public class DecisionApplicationConfiguration {
             FailOpenEndpointPolicyPort failOpenEndpointPolicyPort,
             RelationshipGraphPort relationshipGraphPort,
             ConditionEvaluatorPort conditionEvaluatorPort,
-            ConsistencyTokenStore consistencyTokenStore
+            ConsistencyTokenStore consistencyTokenStore,
+            CircuitBreaker circuitBreaker,
+            DecisionCache decisionCache,
+            ControllerPurposeRegistryPort controllerPurposeRegistryPort,
+            AttributeSchemaRegistryPort attributeSchemaRegistryPort
     ) {
         return new DecisionApplicationService(
                 policyRegistryPort,
@@ -39,16 +47,31 @@ public class DecisionApplicationConfiguration {
                 failOpenEndpointPolicyPort,
                 relationshipGraphPort,
                 conditionEvaluatorPort,
-                consistencyTokenStore
+                consistencyTokenStore,
+                circuitBreaker,
+                decisionCache,
+                controllerPurposeRegistryPort,
+                attributeSchemaRegistryPort
         );
+    }
+
+    @Bean
+    public CircuitBreaker circuitBreaker() {
+        return new CircuitBreaker();
+    }
+
+    @Bean
+    public DecisionCache decisionCache() {
+        return new DecisionCache();
     }
 
     @Bean
     public PolicyAdministrationUseCase policyAdministrationUseCase(
             AuditEvidencePort auditEvidencePort,
-            ObservabilityPort observabilityPort
+            ObservabilityPort observabilityPort,
+            AttributeSchemaRegistryPort attributeSchemaRegistryPort
     ) {
-        return new PolicyAdministrationService(auditEvidencePort, observabilityPort);
+        return new PolicyAdministrationService(auditEvidencePort, observabilityPort, attributeSchemaRegistryPort);
     }
 
     // ============ Phase 2A Adapters ============

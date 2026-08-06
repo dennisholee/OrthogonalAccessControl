@@ -10,6 +10,14 @@ public interface PolicyRegistryPort {
 
     List<String> findMatchedPolicies(CheckPermissionRequest request);
 
+    /**
+     * Returns the names of matched ACTIVE policies whose certification is past due
+     * (Section 4.9) — i.e. {@code nextCertificationDate} in the past with no active waiver.
+     * The PDP must emit a WARN audit event for each such policy; the decision itself is
+     * unaffected until the PAP moves the policy to RESTRICTED.
+     */
+    List<String> findExpiredCertificationPolicies(CheckPermissionRequest request);
+
     List<String> findAuthorizedResourceIds(LookupResourcesRequest request);
 
     /** Returns the active policy version string, e.g. "v3" or "v0" if none active. */

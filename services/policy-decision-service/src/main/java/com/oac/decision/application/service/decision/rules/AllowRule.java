@@ -4,6 +4,9 @@ import com.oac.decision.application.service.decision.CaveatEvaluator;
 import com.oac.decision.application.service.decision.DecisionContext;
 import com.oac.decision.application.service.decision.DecisionOutcome;
 import com.oac.decision.application.service.decision.DecisionRule;
+import com.oac.decision.application.service.decision.rules.caveats.AggregationRequiredCaveatEvaluator;
+import com.oac.decision.application.service.decision.rules.caveats.DataMinimisationCaveatEvaluator;
+import com.oac.decision.application.service.decision.rules.caveats.ExportRestrictionCaveatEvaluator;
 import com.oac.decision.application.service.decision.rules.caveats.FieldMaskCaveatEvaluator;
 import com.oac.decision.application.service.decision.rules.caveats.SourceIpRangeCaveatEvaluator;
 import com.oac.decision.application.service.decision.rules.caveats.TimeWindowCaveatEvaluator;
@@ -30,7 +33,10 @@ public class AllowRule implements DecisionRule {
         this(List.of(
                 new TimeWindowCaveatEvaluator(),
                 new SourceIpRangeCaveatEvaluator(),
-                new FieldMaskCaveatEvaluator()
+                new FieldMaskCaveatEvaluator(),
+                new DataMinimisationCaveatEvaluator(),
+                new ExportRestrictionCaveatEvaluator(),
+                new AggregationRequiredCaveatEvaluator()
         ));
     }
 
@@ -56,15 +62,25 @@ public class AllowRule implements DecisionRule {
             ));
         }
 
+        // Inject the resolved purpose into caveat params for DataMinimisation evaluator
+        Map<String, Object> enrichedCaveatDefs = new HashMap<>(caveatDefs);
+        if (context.request().boundaryContext() != null
+                && context.request().boundaryContext().purpose() != null) {
+            enrichedCaveatDefs.put("_purpose", context.request().boundaryContext().purpose());
+        }
+
         // Evaluate each registered caveat evaluator
         AttributeAccessMap combinedAccessMap = AttributeAccessMap.empty();
 
         for (CaveatEvaluator evaluator : caveatEvaluators) {
-            if (!evaluator.evaluate(context, caveatDefs)) {
-                // Caveat failed — narrow to DENY
+            if (!evaluator.evaluate(context, enrichedCaveatDefs)) {
+                // Caveat failed — narrow to DENY with a domain-specific code when the
+                // evaluator provides one (e.g. DECISION_EXPORT_RESTRICTED)
+                String code = evaluator.failureDecisionCode(context, enrichedCaveatDefs)
+                        .orElse("DECISION_CAVEAT_FAILED");
                 return Optional.of(new DecisionOutcome(
                         "DENY",
-                        "DECISION_CAVEAT_FAILED",
+                        code,
                         "evidence://decision/caveat-failed"
                 ));
             }
@@ -73,7 +89,7 @@ public class AllowRule implements DecisionRule {
             AttributeAccessMap fieldConstraints = evaluator.applyFieldConstraints(
                     context.request().runtimeContext() == null ? java.util.Set.of()
                             : context.request().runtimeContext().keySet(),
-                    caveatDefs
+                    enrichedCaveatDefs
             );
 
             // Merge constraints using field-level override

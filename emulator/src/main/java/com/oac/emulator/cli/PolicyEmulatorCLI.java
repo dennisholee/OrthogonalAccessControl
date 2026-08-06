@@ -12,7 +12,10 @@ import com.oac.decision.adapter.out.audit.InMemoryAuditEvidenceAdapter;
 import com.oac.decision.adapter.out.expression.SpelConditionEvaluatorAdapter;
 import com.oac.decision.adapter.out.observability.MetricsObservabilityAdapter;
 import com.oac.decision.adapter.out.policy.ClasspathFailOpenEndpointPolicyAdapter;
+import com.oac.decision.adapter.out.schema.DefaultAttributeSchemaRegistryStub;
 import com.oac.decision.application.service.DecisionApplicationService;
+import com.oac.decision.application.service.decision.CircuitBreaker;
+import com.oac.decision.application.service.decision.DecisionCache;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
 import java.io.File;
@@ -97,10 +100,19 @@ public class PolicyEmulatorCLI {
                 return token;
             }
         };
+        // In-memory controller purpose registry — fail-open for non-CDP usage
+        var controllerPurposeRegistry = new com.oac.decision.application.port.out.ControllerPurposeRegistryPort() {
+            @Override
+            public boolean isPurposeAuthorized(String tenant, String purpose) { return true; }
+            @Override
+            public void registerPurpose(String tenant, String purpose, String lawfulBasis) { }
+        };
 
         return new DecisionApplicationService(
                 policyRegistry, attributeResolver, auditEvidence, observability,
-                failOpenPolicy, relationshipGraph, conditionEvaluator, consistencyTokenStore
+                failOpenPolicy, relationshipGraph, conditionEvaluator, consistencyTokenStore,
+                new CircuitBreaker(), new DecisionCache(), controllerPurposeRegistry,
+                new DefaultAttributeSchemaRegistryStub()
         );
     }
 

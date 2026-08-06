@@ -3,10 +3,13 @@ package com.oac.sample.bdd;
 import com.oac.decision.adapter.in.web.DecisionApplicationConfiguration;
 import com.oac.decision.adapter.out.attribute.InMemoryAttributeResolverAdapter;
 import com.oac.decision.adapter.out.audit.InMemoryAuditEvidenceAdapter;
+import com.oac.decision.adapter.out.expression.SpelConditionEvaluatorAdapter;
 import com.oac.decision.adapter.out.observability.MetricsObservabilityAdapter;
 import com.oac.decision.adapter.out.policy.ClasspathFailOpenEndpointPolicyAdapter;
 import com.oac.decision.adapter.out.policy.MongoPolicyRegistryAdapter;
+import com.oac.decision.adapter.out.purpose.MongoControllerPurposeRegistryAdapter;
 import com.oac.decision.adapter.out.relationship.MongoRelationshipGraphAdapter;
+import com.oac.decision.adapter.out.schema.MongoAttributeSchemaRegistryAdapter;
 import com.oac.decision.application.port.in.DecisionQueryUseCase;
 import com.oac.enforcement.DecisionClient;
 import io.cucumber.spring.CucumberContextConfiguration;
@@ -102,6 +105,18 @@ public class CucumberSpringConfiguration {
         }
 
         @Bean
+        public com.oac.decision.application.port.out.ControllerPurposeRegistryPort controllerPurposeRegistryPort(
+                MongoTemplate mongoTemplate) {
+            return new MongoControllerPurposeRegistryAdapter(mongoTemplate);
+        }
+
+        @Bean
+        public com.oac.decision.application.port.out.AttributeSchemaRegistryPort attributeSchemaRegistryPort(
+                MongoTemplate mongoTemplate) {
+            return new MongoAttributeSchemaRegistryAdapter(mongoTemplate);
+        }
+
+        @Bean
         public com.oac.decision.application.port.out.RelationshipGraphPort relationshipGraphPort(
                 MongoTemplate mongoTemplate) {
             return new MongoRelationshipGraphAdapter(mongoTemplate);
@@ -126,6 +141,11 @@ public class CucumberSpringConfiguration {
         @Bean
         public com.oac.decision.application.port.out.FailOpenEndpointPolicyPort failOpenEndpointPolicyPort() {
             return new ClasspathFailOpenEndpointPolicyAdapter();
+        }
+
+        @Bean
+        public com.oac.decision.application.port.out.ConditionEvaluatorPort conditionEvaluatorPort() {
+            return new SpelConditionEvaluatorAdapter();
         }
     }
 }

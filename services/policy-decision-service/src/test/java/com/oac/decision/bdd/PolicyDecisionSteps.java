@@ -20,7 +20,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class PolicyDecisionSteps {
 
     private static final java.util.Set<String> TEST_COLLECTIONS = java.util.Set.of(
-            "policies", "relationships", "resource_grants", "pii_classification", "consistency_tokens");
+            "policies", "relationships", "resource_grants", "pii_classification",
+            "consistency_tokens", "controller_purpose_registry", "shadow_decisions",
+            "policy_sets", "attribute_schema");
 
     @Autowired
     private TestRestTemplate restTemplate;
@@ -28,9 +30,25 @@ public class PolicyDecisionSteps {
     @Autowired
     private MongoTemplate mongoTemplate;
 
+    @Autowired
+    private com.oac.decision.adapter.out.health.OacDecisionHealthIndicator oacHealthIndicator;
+
+    @Autowired
+    private com.oac.decision.application.service.decision.CircuitBreaker circuitBreaker;
+
+    @Autowired
+    private com.oac.decision.application.service.decision.DecisionCache decisionCache;
+
+    @Autowired
+    private com.oac.decision.application.port.out.ConsistencyTokenStore consistencyTokenStore;
+
+    @Autowired
+    private com.oac.decision.adapter.out.audit.InMemoryAuditEvidenceAdapter auditEvidenceAdapter;
+
     private final Map<String, Object> requestBody = new LinkedHashMap<>();
     private final Map<String, Object> runtimeContext = new LinkedHashMap<>();
     private final Map<String, Object> boundaryContext = new LinkedHashMap<>();
+    private final Map<String, String> issuedTokensByScope = new LinkedHashMap<>();
     private ResponseEntity<Map<String, Object>> response;
     private ResponseEntity<Map<String, Object>> policyCreateResponse;
     private ResponseEntity<List<Map<String, Object>>> auditEventsResponse;
@@ -38,6 +56,7 @@ public class PolicyDecisionSteps {
     private ScreenCapture screenCapture;
     private String currentFeatureName;
     private String currentScenarioName;
+    private String lastSavedPolicyName;
 
     @Before
     public void beforeScenario(Scenario scenario) {
@@ -48,6 +67,10 @@ public class PolicyDecisionSteps {
             mongoTemplate.dropCollection("resource_grants");
             mongoTemplate.dropCollection("pii_classification");
             mongoTemplate.dropCollection("consistency_tokens");
+            mongoTemplate.dropCollection("controller_purpose_registry");
+            mongoTemplate.dropCollection("shadow_decisions");
+            mongoTemplate.dropCollection("policy_sets");
+            mongoTemplate.dropCollection("attribute_schema");
         } catch (Exception e) {
             // Collections may not exist yet — safe to ignore
         }
@@ -73,6 +96,12 @@ public class PolicyDecisionSteps {
         this.policyCreateResponse = null;
         this.auditEventsResponse = null;
         this.capturedConsistencyToken = null;
+
+        // Reset resilient in-process state between scenarios to avoid cross-contamination.
+        if (this.circuitBreaker != null) this.circuitBreaker.reset();
+        if (this.decisionCache != null) this.decisionCache.reset();
+        if (this.auditEvidenceAdapter != null) this.auditEvidenceAdapter.clear();
+        if (this.oacHealthIndicator != null) this.oacHealthIndicator.setDegraded(false);
 
         // Extract feature name from the scenario ID (e.g. "Feature Name.Scenario Name")
         String fullId = scenario.getId();
@@ -162,8 +191,24 @@ public class PolicyDecisionSteps {
         policy.put("effect", effect);
         policy.put("state", "ACTIVE");
         mongoTemplate.save(policy, "policies");
+        this.lastSavedPolicyName = name;
         screenCapture.captureSeedData("policies (" + name + ")", policy);
         screenCapture.log("Saved policy: " + name + " effect=" + effect);
+    }
+
+    @Given("a policy document with effect {string} and name {string} for action {string} and resource type {string} is saved to MongoDB")
+    public void saveScopedPolicyToMongoDB(String effect, String name, String action, String resourceType) {
+        Map<String, Object> policy = new LinkedHashMap<>();
+        policy.put("name", name);
+        policy.put("effect", effect);
+        policy.put("state", "ACTIVE");
+        policy.put("action", action);
+        policy.put("resourceType", resourceType);
+        mongoTemplate.save(policy, "policies");
+        this.lastSavedPolicyName = name;
+        screenCapture.captureSeedData("policies (" + name + " scoped to " + action + "/" + resourceType + ")", policy);
+        screenCapture.log("Saved scoped policy: " + name + " effect=" + effect
+                + " action=" + action + " resourceType=" + resourceType);
     }
 
     @Given("a policy document with effect {string} and field-mask {string} is saved to MongoDB")
@@ -201,6 +246,7 @@ public class PolicyDecisionSteps {
         // Don't hardcode action/resourceType; the policies must match the request context
         // which is set by subsequent Given steps (subject, action, resource, boundary)
         mongoTemplate.save(policy, "policies");
+        this.lastSavedPolicyName = name;
         screenCapture.captureSeedData("policies (" + name + " ReBAC)", policy);
         screenCapture.log("Saved ReBAC policy: requires " + relationshipType);
     }
@@ -290,6 +336,569 @@ public class PolicyDecisionSteps {
         screenCapture.captureSeedData("policies (" + name + " simple)", policy);
     }
 
+    @Given("a suppression flag {string} with value {string}")
+    public void setSuppressionFlag(String flagName, String flagValue) {
+        @SuppressWarnings("unchecked")
+        Map<String, Boolean> suppressionFlags = (Map<String, Boolean>) this.requestBody.computeIfAbsent(
+                "suppressionFlags", k -> new LinkedHashMap<String, Boolean>());
+        suppressionFlags.put(flagName, Boolean.valueOf(flagValue));
+        screenCapture.log("Set suppression flag: " + flagName + " = " + flagValue);
+    }
+
+    @Given("a consent attribute {string} with status {string}")
+    public void setConsentAttribute(String attributeName, String status) {
+        @SuppressWarnings("unchecked")
+        Map<String, Object> consentAttributes = (Map<String, Object>) this.requestBody.computeIfAbsent(
+                "consentAttributes", k -> new LinkedHashMap<String, Object>());
+        consentAttributes.put(attributeName, status.toUpperCase());
+        screenCapture.log("Set consent attribute: " + attributeName + " = " + status.toUpperCase());
+    }
+
+    @Given("a consent version {string}")
+    public void setConsentVersion(String version) {
+        this.requestBody.put("consentVersion", version);
+        screenCapture.log("Set consent version: " + version);
+    }
+
+    @Given("a cross-boundary justification {string}")
+    public void setCrossBoundaryJustification(String justification) {
+        this.requestBody.put("crossBoundaryJustification", justification);
+        screenCapture.log("Set cross-boundary justification: " + justification);
+    }
+
+    @Given("a boundary context tenant {string} geography {string} market {string} lineOfBusiness {string} channel {string} purpose {string}")
+    public void setBoundaryContextWithPurposeOnly(String tenant, String geography, String market, String lob, String channel, String purpose) {
+        this.boundaryContext.clear();
+        this.boundaryContext.put("tenant", tenant);
+        this.boundaryContext.put("geography", geography);
+        this.boundaryContext.put("market", market);
+        this.boundaryContext.put("lineOfBusiness", lob);
+        this.boundaryContext.put("channel", channel);
+        if (purpose != null && !purpose.isBlank() && !"*".equals(purpose)) {
+            this.boundaryContext.put("purpose", purpose);
+        }
+        this.requestBody.put("boundaryContext", this.boundaryContext);
+        screenCapture.log("Set boundary context (purpose only): tenant=" + tenant + " geo=" + geography
+                + " market=" + market + " lob=" + lob + " channel=" + channel + " purpose=" + purpose);
+    }
+
+    @Given("a boundary context tenant {string} geography {string} market {string} lineOfBusiness {string} channel {string} purpose {string} regulatoryRegime {string}")
+    public void setBoundaryContextWithPurpose(String tenant, String geography, String market, String lob, String channel, String purpose, String regime) {
+        this.boundaryContext.clear();
+        this.boundaryContext.put("tenant", tenant);
+        this.boundaryContext.put("geography", geography);
+        this.boundaryContext.put("market", market);
+        this.boundaryContext.put("lineOfBusiness", lob);
+        this.boundaryContext.put("channel", channel);
+        if (purpose != null && !purpose.isBlank() && !"*".equals(purpose)) {
+            this.boundaryContext.put("purpose", purpose);
+        }
+        if (regime != null && !regime.isBlank() && !"*".equals(regime)) {
+            this.boundaryContext.put("regulatoryRegime", regime);
+        }
+        this.requestBody.put("boundaryContext", this.boundaryContext);
+        screenCapture.log("Set boundary context: tenant=" + tenant + " geo=" + geography + " market=" + market
+                + " lob=" + lob + " channel=" + channel + " purpose=" + purpose + " regime=" + regime);
+    }
+
+    @Given("a CDP policy document with purpose {string} is saved to MongoDB")
+    public void saveCdpPolicyForPurpose(String purpose) {
+        Map<String, Object> policy = new LinkedHashMap<>();
+        String name = "POL.CDP.PURPOSE." + purpose.toUpperCase().replaceAll("[^a-zA-Z0-9_-]", "_");
+        policy.put("name", name);
+        policy.put("effect", "ALLOW");
+        policy.put("state", "ACTIVE");
+        policy.put("action", "*");
+        policy.put("resourceType", "*");
+        policy.put("purpose", purpose);
+        mongoTemplate.save(policy, "policies");
+        this.lastSavedPolicyName = name;
+        screenCapture.captureSeedData("policies (CDP purpose: " + name + ")", policy);
+        screenCapture.log("Saved CDP policy for purpose: " + purpose);
+    }
+
+    @Given("a CDP policy document with regulatory regime {string} is saved to MongoDB")
+    public void saveCdpPolicyForRegulatoryRegime(String regime) {
+        Map<String, Object> policy = new LinkedHashMap<>();
+        String name = "POL.CDP.REGIME." + regime.toUpperCase().replaceAll("[^a-zA-Z0-9_-]", "_");
+        policy.put("name", name);
+        policy.put("effect", "ALLOW");
+        policy.put("state", "ACTIVE");
+        policy.put("action", "*");
+        policy.put("resourceType", "*");
+        policy.put("regulatoryRegime", regime);
+        mongoTemplate.save(policy, "policies");
+        this.lastSavedPolicyName = name;
+        screenCapture.captureSeedData("policies (CDP regime: " + name + ")", policy);
+        screenCapture.log("Saved CDP policy for regulatory regime: " + regime);
+    }
+
+    @Given("the policy has purpose {string}")
+    public void updatePolicyPurpose(String purpose) {
+        updateLastSavedPolicy(policy -> policy.put("purpose", purpose));
+        screenCapture.log("Set purpose on policy " + this.lastSavedPolicyName + ": " + purpose);
+    }
+
+    @Given("the policy has purpose array [{string}, {string}]")
+    public void updatePolicyPurposeArray(String v1, String v2) {
+        List<Object> values = List.of(v1, v2);
+        updateLastSavedPolicy(policy -> policy.put("purpose", values));
+        screenCapture.log("Set purpose array on policy " + this.lastSavedPolicyName + ": " + values);
+    }
+
+    @Given("the policy has purpose array [{string}, {string}, {string}]")
+    public void updatePolicyPurposeArray3(String v1, String v2, String v3) {
+        List<Object> values = List.of(v1, v2, v3);
+        updateLastSavedPolicy(policy -> policy.put("purpose", values));
+        screenCapture.log("Set purpose array on policy " + this.lastSavedPolicyName + ": " + values);
+    }
+
+    @Given("the policy has regulatoryRegime {string}")
+    public void updatePolicyRegulatoryRegime(String regime) {
+        updateLastSavedPolicy(policy -> policy.put("regulatoryRegime", regime));
+        screenCapture.log("Set regulatoryRegime on policy " + this.lastSavedPolicyName + ": " + regime);
+    }
+
+    @Given("the policy has regulatoryRegime array [{string}, {string}]")
+    public void updatePolicyRegulatoryRegimeArray(String v1, String v2) {
+        List<Object> values = List.of(v1, v2);
+        updateLastSavedPolicy(policy -> policy.put("regulatoryRegime", values));
+        screenCapture.log("Set regulatoryRegime array on policy " + this.lastSavedPolicyName + ": " + values);
+    }
+
+    @Given("the policy has regulatoryRegime array [{string}, {string}, {string}]")
+    public void updatePolicyRegulatoryRegimeArray3(String v1, String v2, String v3) {
+        List<Object> values = List.of(v1, v2, v3);
+        updateLastSavedPolicy(policy -> policy.put("regulatoryRegime", values));
+        screenCapture.log("Set regulatoryRegime array on policy " + this.lastSavedPolicyName + ": " + values);
+    }
+
+    @Given("the policy has spelCondition {string}")
+    public void updatePolicySpelCondition(String spelCondition) {
+        updateLastSavedPolicy(policy -> policy.put("spelCondition", spelCondition));
+        screenCapture.log("Set spelCondition on policy " + this.lastSavedPolicyName + ": " + spelCondition);
+    }
+
+    @Given("the policy has requiredRelationship {string}")
+    public void updatePolicyRequiredRelationship(String relationshipType) {
+        updateLastSavedPolicy(policy -> policy.put("requiredRelationship", relationshipType));
+        screenCapture.log("Set requiredRelationship on policy " + this.lastSavedPolicyName + ": " + relationshipType);
+    }
+
+    @Given("the policy has resourceTypes {string}")
+    public void updatePolicyResourceTypes(String resourceTypesCsv) {
+        List<Object> values = new ArrayList<>(splitCsv(resourceTypesCsv));
+        updateLastSavedPolicy(policy -> policy.put("resourceTypes", values));
+        screenCapture.log("Set resourceTypes array on policy " + this.lastSavedPolicyName
+                + ": " + resourceTypesCsv);
+    }
+
+    @Given("the policy has environment {string}")
+    public void updatePolicyEnvironment(String environment) {
+        updateLastSavedPolicy(policy -> policy.put("environment", environment));
+        screenCapture.log("Set environment on policy " + this.lastSavedPolicyName + ": " + environment);
+    }
+
+    @Given("a relationship edge from {string} to {string} of type {string} with boundaryScope market {string} and lineOfBusiness {string} is saved to MongoDB")
+    public void saveRelationshipEdgeWithBoundaryScope(String fromId, String toId, String type,
+                                                      String market, String lob) {
+        Map<String, Object> rel = new LinkedHashMap<>();
+        rel.put("subjectId", fromId);
+        rel.put("resourceId", toId);
+        rel.put("relationshipType", type);
+        rel.put("createdAt", Instant.now().toString());
+        Map<String, Object> scope = new LinkedHashMap<>();
+        scope.put("market", market);
+        scope.put("lineOfBusiness", lob);
+        rel.put("boundaryScope", scope);
+        mongoTemplate.save(rel, "relationships");
+        screenCapture.captureSeedData("relationships ("
+                + fromId + " → " + toId + " : " + type + " scope={" + market + "/" + lob + "})", rel);
+        screenCapture.log("Saved scoped relationship edge: " + fromId + " → " + toId
+                + " type=" + type + " scope={market:" + market + ", lob:" + lob + "}");
+    }
+
+    @Given("the policy requires relationship {string} with boundaryScope market {string} and lineOfBusiness {string}")
+    public void updatePolicyRelationshipBoundaryScope(String relationshipType, String market, String lob) {
+        updateLastSavedPolicy(policy -> {
+            policy.put("requiredRelationship", relationshipType);
+            Map<String, Object> scope = new LinkedHashMap<>();
+            scope.put("market", market);
+            scope.put("lineOfBusiness", lob);
+            policy.put("relationshipBoundaryScope", scope);
+        });
+        screenCapture.log("Set relationshipBoundaryScope on policy " + this.lastSavedPolicyName
+                + ": type=" + relationshipType + " scope={market:" + market + ", lob:" + lob + "}");
+    }
+
+    @Given("a relationship edge from {string} to {string} of type {string} with boundaryScope market {string} is saved to MongoDB")
+    public void saveRelationshipEdgeWithBoundaryScopeMarketOnly(String fromId, String toId, String type, String market) {
+        Map<String, Object> rel = new LinkedHashMap<>();
+        rel.put("subjectId", fromId);
+        rel.put("resourceId", toId);
+        rel.put("relationshipType", type);
+        rel.put("createdAt", Instant.now().toString());
+        Map<String, Object> scope = new LinkedHashMap<>();
+        scope.put("market", market);
+        rel.put("boundaryScope", scope);
+        mongoTemplate.save(rel, "relationships");
+        screenCapture.captureSeedData("relationships ("
+                + fromId + " → " + toId + " : " + type + " scope={market:" + market + "})", rel);
+        screenCapture.log("Saved scoped relationship edge: " + fromId + " → " + toId
+                + " type=" + type + " scope={market:" + market + "}");
+    }
+
+    @Given("the policy requires relationship {string}")
+    public void updatePolicyRequiredRelationshipOnly(String relationshipType) {
+        updateLastSavedPolicy(policy -> policy.put("requiredRelationship", relationshipType));
+        screenCapture.log("Set requiredRelationship on policy " + this.lastSavedPolicyName + ": " + relationshipType);
+    }
+    @Given("a policy set with id {string} combining {string} and policies {string} is saved to MongoDB")
+    public void savePolicySet(String setId, String algorithm, String policyIdsCsv) {
+        Map<String, Object> set = new LinkedHashMap<>();
+        set.put("setId", setId);
+        set.put("name", "Policy Set " + setId);
+        set.put("combiningAlgorithm", algorithm);
+        set.put("policyIds", splitCsv(policyIdsCsv));
+        set.put("version", 1);
+        mongoTemplate.save(set, "policy_sets");
+        screenCapture.captureSeedData("policy_sets (" + setId + ")", set);
+        screenCapture.log("Saved policy set " + setId + " combining " + algorithm
+                + " policies=" + policyIdsCsv);
+    }
+
+    @Given("the policy set {string} has environment {string}")
+    public void setPolicySetEnvironment(String setId, String environment) {
+        updatePolicySet(setId, set -> set.put("environment", environment));
+        screenCapture.log("Set policy set " + setId + " environment=" + environment);
+    }
+
+    @Given("the policy set {string} has canary by-tenant {string}")
+    public void setPolicySetCanary(String setId, String tenantsCsv) {
+        updatePolicySet(setId, set -> set.put("canary", Map.of(
+                "enabled", true,
+                "target", "by-tenant",
+                "targetValues", splitCsv(tenantsCsv))));
+        screenCapture.log("Set policy set " + setId + " canary by-tenant " + tenantsCsv);
+    }
+
+    @Given("the attribute schema entry {string} of type {string} is registered and required")
+    public void registerRequiredAttributeSchema(String attributeName, String attributeType) {
+        Map<String, Object> schema = new LinkedHashMap<>();
+        schema.put("attributeName", attributeName);
+        schema.put("attributeType", attributeType);
+        schema.put("cardinality", "SINGLE");
+        schema.put("source", "resource-metadata");
+        schema.put("sensitivity", "RESTRICTED");
+        schema.put("isRequired", true);
+        mongoTemplate.save(schema, "attribute_schema");
+        screenCapture.captureSeedData("attribute_schema (" + attributeName + ")", schema);
+        screenCapture.log("Registered required attribute schema: " + attributeName
+                + " type=" + attributeType);
+    }
+
+    private void updatePolicySet(String setId, java.util.function.Consumer<Map<String, Object>> updater) {
+        Map<String, Object> set = mongoTemplate.findOne(
+                org.springframework.data.mongodb.core.query.Query.query(
+                        org.springframework.data.mongodb.core.query.Criteria.where("setId").is(setId)),
+                Map.class, "policy_sets");
+        if (set != null) {
+            updater.accept(set);
+            mongoTemplate.save(set, "policy_sets");
+        }
+    }
+
+    @Given("principal domain membership tenants {string} markets {string} geographies {string} linesOfBusiness {string} channels {string}")
+    public void setPrincipalMemberships(String tenants, String markets, String geographies, String lobs, String channels) {
+        setPrincipalMembershipsAll(tenants, markets, geographies, lobs, channels, null, null);
+    }
+
+    @Given("principal domain membership tenants {string} markets {string} geographies {string} linesOfBusiness {string} channels {string} purposes {string}")
+    public void setPrincipalMembershipsWithPurposes(String tenants, String markets, String geographies, String lobs, String channels, String purposes) {
+        setPrincipalMembershipsAll(tenants, markets, geographies, lobs, channels, purposes, null);
+    }
+
+    @Given("principal domain membership tenants {string} markets {string} geographies {string} linesOfBusiness {string} channels {string} regulatoryRegimes {string}")
+    public void setPrincipalMembershipsWithRegimes(String tenants, String markets, String geographies, String lobs, String channels, String regimes) {
+        setPrincipalMembershipsAll(tenants, markets, geographies, lobs, channels, null, regimes);
+    }
+
+    private void setPrincipalMembershipsAll(String tenants, String markets, String geographies, String lobs,
+                                            String channels, String purposes, String regimes) {
+        Map<String, Object> pm = new LinkedHashMap<>();
+        pm.put("tenants", splitCsv(tenants));
+        pm.put("markets", splitCsv(markets));
+        pm.put("geographies", splitCsv(geographies));
+        pm.put("linesOfBusiness", splitCsv(lobs));
+        pm.put("channels", splitCsv(channels));
+        if (purposes != null && !purposes.isBlank()) pm.put("purposes", splitCsv(purposes));
+        if (regimes != null && !regimes.isBlank()) pm.put("regulatoryRegimes", splitCsv(regimes));
+        this.requestBody.put("principalMemberships", pm);
+        screenCapture.log("Set principal domain memberships: " + pm);
+    }
+
+    private static List<String> splitCsv(String csv) {
+        if (csv == null || csv.isBlank()) return new ArrayList<>();
+        return Arrays.stream(csv.split(",")).map(String::trim).filter(s -> !s.isEmpty()).collect(java.util.stream.Collectors.toList());
+    }
+
+    @Given("the policy has effectiveFrom {string}")
+    public void updatePolicyEffectiveFrom(String effectiveFrom) {
+        updateLastSavedPolicy(policy -> policy.put("effectiveFrom", effectiveFrom));
+        screenCapture.log("Set effectiveFrom on policy " + this.lastSavedPolicyName + ": " + effectiveFrom);
+    }
+
+    @Given("the policy has effectiveUntil {string}")
+    public void updatePolicyEffectiveUntil(String effectiveUntil) {
+        updateLastSavedPolicy(policy -> policy.put("effectiveUntil", effectiveUntil));
+        screenCapture.log("Set effectiveUntil on policy " + this.lastSavedPolicyName + ": " + effectiveUntil);
+    }
+
+    @Given("the policy has policyType {string}")
+    public void updatePolicyType(String policyType) {
+        updateLastSavedPolicy(policy -> policy.put("policyType", policyType));
+        screenCapture.log("Set policyType on policy " + this.lastSavedPolicyName + ": " + policyType);
+    }
+
+    @Given("a controller purpose {string} is registered for tenant {string} with lawful basis {string}")
+    public void registerControllerPurpose(String purpose, String tenant, String lawfulBasis) {
+        Map<String, Object> doc = new LinkedHashMap<>();
+        doc.put("tenant", tenant);
+        doc.put("purpose", purpose);
+        doc.put("lawfulBasis", lawfulBasis);
+        mongoTemplate.save(doc, "controller_purpose_registry");
+        screenCapture.captureSeedData("controller_purpose_registry ("
+                + tenant + "::" + purpose + " basis=" + lawfulBasis + ")", doc);
+        screenCapture.log("Registered controller purpose: tenant=" + tenant
+                + " purpose=" + purpose + " lawfulBasis=" + lawfulBasis);
+    }
+
+    @Given("the policy has effectiveWindow from now minus {int} hours to now plus {int} hours")
+    public void updatePolicyEffectiveWindow(int minusHours, int plusHours) {
+        String from = java.time.Instant.now().minus(minusHours, java.time.temporal.ChronoUnit.HOURS).toString();
+        String until = java.time.Instant.now().plus(plusHours, java.time.temporal.ChronoUnit.HOURS).toString();
+        updateLastSavedPolicy(policy -> {
+            policy.put("effectiveFrom", from);
+            policy.put("effectiveUntil", until);
+        });
+        screenCapture.log("Set effectiveWindow on policy " + this.lastSavedPolicyName
+                + ": from=" + from + " until=" + until);
+    }
+
+    @Given("the policy has tenant {string}")
+    public void updatePolicyTenant(String tenant) {
+        updateLastSavedPolicy(policy -> policy.put("tenant", tenant));
+        screenCapture.log("Set tenant on policy " + this.lastSavedPolicyName + ": " + tenant);
+    }
+
+    @Given("the policy inheritsFrom {string}")
+    public void updatePolicyInheritsFrom(String parentName) {
+        updateLastSavedPolicy(policy -> policy.put("inheritsFrom", parentName));
+        screenCapture.log("Set inheritsFrom on policy " + this.lastSavedPolicyName + ": " + parentName);
+    }
+
+    @Given("the policy overrides tenant {string}")
+    public void updatePolicyOverridesTenant(String tenant) {
+        updateLastSavedPolicy(policy -> {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> overrides = (Map<String, Object>) policy.computeIfAbsent(
+                    "overrides", k -> new LinkedHashMap<String, Object>());
+            overrides.put("tenant", tenant);
+        });
+        screenCapture.log("Set overrides.tenant on policy " + this.lastSavedPolicyName + ": " + tenant);
+    }
+
+    @Given("the policy overrides geography {string}")
+    public void updatePolicyOverridesGeography(String geography) {
+        updateLastSavedPolicy(policy -> {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> overrides = (Map<String, Object>) policy.computeIfAbsent(
+                    "overrides", k -> new LinkedHashMap<String, Object>());
+            overrides.put("geography", geography);
+        });
+        screenCapture.log("Set overrides.geography on policy " + this.lastSavedPolicyName + ": " + geography);
+    }
+
+    @Given("the policy overrides market {string}")
+    public void updatePolicyOverridesMarket(String market) {
+        updateLastSavedPolicy(policy -> {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> overrides = (Map<String, Object>) policy.computeIfAbsent(
+                    "overrides", k -> new LinkedHashMap<String, Object>());
+            overrides.put("market", market);
+        });
+        screenCapture.log("Set overrides.market on policy " + this.lastSavedPolicyName + ": " + market);
+    }
+
+    @Given("the policy has tenant {string} geography {string} market {string} lineOfBusiness {string} channel {string}")
+    public void updatePolicyBoundaryFields(String tenant, String geography, String market, String lob, String channel) {
+        updateLastSavedPolicy(policy -> {
+            policy.put("tenant", tenant);
+            policy.put("geography", geography);
+            policy.put("market", market);
+            policy.put("lineOfBusiness", lob);
+            policy.put("channel", channel);
+        });
+        screenCapture.log("Set boundary fields on policy " + this.lastSavedPolicyName
+                + ": tenant=" + tenant + " geography=" + geography + " market=" + market
+                + " lob=" + lob + " channel=" + channel);
+    }
+
+    @Given("the policy has composition {string} referencing {string} and {string}")
+    public void updatePolicyComposition2(String operator, String ref1, String ref2) {
+        updateLastSavedPolicy(policy -> {
+            Map<String, Object> comp = new LinkedHashMap<>();
+            comp.put("operator", operator);
+            comp.put("policies", List.of(ref1, ref2));
+            policy.put("composition", comp);
+        });
+        screenCapture.log("Set composition on policy " + this.lastSavedPolicyName
+                + ": " + operator + " [" + ref1 + ", " + ref2 + "]");
+    }
+
+    @Given("the policy has composition {string} referencing {string}")
+    public void updatePolicyComposition1(String operator, String ref1) {
+        updateLastSavedPolicy(policy -> {
+            Map<String, Object> comp = new LinkedHashMap<>();
+            comp.put("operator", operator);
+            comp.put("policies", List.of(ref1));
+            policy.put("composition", comp);
+        });
+        screenCapture.log("Set composition on policy " + this.lastSavedPolicyName
+                + ": " + operator + " [" + ref1 + "]");
+    }
+
+    @Given("the policy {string} has a certification nextCertificationDate {string} lastCertifiedBy {string} lastCertifiedAt {string}")
+    public void updatePolicyCertification(String policyName, String nextCertificationDate,
+                                          String lastCertifiedBy, String lastCertifiedAt) {
+        updatePolicyCertification(policyName, nextCertificationDate, lastCertifiedBy, lastCertifiedAt, null);
+    }
+
+    @Given("the policy {string} has a certification nextCertificationDate {string} lastCertifiedBy {string} lastCertifiedAt {string} with a waiver expiring {string}")
+    public void updatePolicyCertificationWithWaiver(String policyName, String nextCertificationDate,
+                                                    String lastCertifiedBy, String lastCertifiedAt,
+                                                    String waiverExpiry) {
+        updatePolicyCertification(policyName, nextCertificationDate, lastCertifiedBy, lastCertifiedAt, waiverExpiry);
+    }
+
+    private void updatePolicyCertification(String policyName, String nextCertificationDate,
+                                           String lastCertifiedBy, String lastCertifiedAt,
+                                           String waiverExpiry) {
+        Map<String, Object> cert = new LinkedHashMap<>();
+        cert.put("status", "CERTIFIED");
+        cert.put("nextCertificationDate", nextCertificationDate);
+        cert.put("lastCertifiedBy", lastCertifiedBy);
+        cert.put("lastCertifiedAt", lastCertifiedAt);
+        if (waiverExpiry != null) {
+            Map<String, Object> waiver = new LinkedHashMap<>();
+            waiver.put("expiryDate", waiverExpiry);
+            waiver.put("riskRationale", "temporary migration period while replacement policy is authored");
+            waiver.put("compensatingControls", "additional monitoring and manual approval gate in place");
+            cert.put("waiver", waiver);
+        } else {
+            cert.put("waiver", null);
+        }
+        org.springframework.data.mongodb.core.query.Update update =
+                org.springframework.data.mongodb.core.query.Update.update("certification", cert);
+        mongoTemplate.updateFirst(
+                org.springframework.data.mongodb.core.query.Query.query(
+                        org.springframework.data.mongodb.core.query.Criteria.where("name").is(policyName)),
+                update, "policies");
+        screenCapture.log("Updated certification for " + policyName + ": nextCertificationDate="
+                + nextCertificationDate + " waiverExpiry=" + waiverExpiry);
+    }
+
+    @Given("the policy {string} is in state {string}")
+    public void updatePolicyState(String policyName, String state) {
+        org.springframework.data.mongodb.core.query.Update update =
+                org.springframework.data.mongodb.core.query.Update.update("state", state);
+        mongoTemplate.updateFirst(
+                org.springframework.data.mongodb.core.query.Query.query(
+                        org.springframework.data.mongodb.core.query.Criteria.where("name").is(policyName)),
+                update, "policies");
+        screenCapture.log("Set policy " + policyName + " state=" + state);
+    }
+
+    @Then("an audit event of type {string} should exist with severity {string} for entity {string}")
+    public void verifyAuditEventExistsWithSeverity(String eventType, String severity, String entityId) {
+        List<Map<String, Object>> events = fetchAuditEvents(entityId);
+        boolean found = events.stream().anyMatch(event ->
+                eventType.equals(event.get("eventType")) && severity.equals(event.get("severity")));
+        assertThat(found).as("audit event " + eventType + " [" + severity + "] for " + entityId).isTrue();
+        screenCapture.logAssertion("Audit event " + eventType + " [" + severity + "] for " + entityId,
+                found, "present", found ? "found" : "not found");
+    }
+
+    @Then("no audit event of type {string} should exist for entity {string}")
+    public void verifyNoAuditEvent(String eventType, String entityId) {
+        List<Map<String, Object>> events = fetchAuditEvents(entityId);
+        boolean found = events.stream().anyMatch(event -> eventType.equals(event.get("eventType")));
+        assertThat(found).as("audit event " + eventType + " for " + entityId).isFalse();
+        screenCapture.logAssertion("No audit event " + eventType + " for " + entityId,
+                !found, "absent", found ? "found" : "absent");
+    }
+
+    private List<Map<String, Object>> fetchAuditEvents(String entityId) {
+        String url = "http://localhost:" + CucumberSpringConfiguration.getPort()
+                + "/v1/admin/audit-events?entityId=" + entityId;
+        this.auditEventsResponse = restTemplate.exchange(url, HttpMethod.GET, null,
+                new ParameterizedTypeReference<List<Map<String, Object>>>() {});
+        return this.auditEventsResponse.getBody() != null ? this.auditEventsResponse.getBody() : List.of();
+    }
+
+    @Given("a shadow evaluation policy with effect {string} and name {string} for action {string} and resource type {string} is saved to MongoDB")
+    public void saveShadowEvaluationPolicy(String effect, String name, String action, String resourceType) {
+        Map<String, Object> policy = new LinkedHashMap<>();
+        policy.put("name", name);
+        policy.put("effect", effect);
+        policy.put("state", "DRAFT");
+        policy.put("shadowEvaluation", true);
+        policy.put("action", action);
+        policy.put("resourceType", resourceType);
+        mongoTemplate.save(policy, "policies");
+        this.lastSavedPolicyName = name;
+        screenCapture.captureSeedData("policies (shadow: " + name + ")", policy);
+        screenCapture.log("Saved shadow evaluation policy: " + name + " effect=" + effect
+                + " action=" + action + " resourceType=" + resourceType);
+    }
+
+    @Then("the shadow-decisions collection should contain {int} entries for policy {string}")
+    public void verifyShadowDecisions(int expectedCount, String policyName) {
+        verifyShadowDecisionsCount(expectedCount, policyName);
+    }
+
+    @Then("the shadow-decisions collection should contain {int} entry for policy {string}")
+    public void verifyShadowDecision(int expectedCount, String policyName) {
+        verifyShadowDecisionsCount(expectedCount, policyName);
+    }
+
+    private void verifyShadowDecisionsCount(int expectedCount, String policyName) {
+        long count = mongoTemplate.count(
+                org.springframework.data.mongodb.core.query.Query.query(
+                        org.springframework.data.mongodb.core.query.Criteria.where("policyId").is(policyName)),
+                "shadow_decisions");
+        assertThat(count).as("shadow-decisions entries for " + policyName).isEqualTo(expectedCount);
+        screenCapture.logAssertion("Shadow-decisions count for " + policyName,
+                count == expectedCount, String.valueOf(expectedCount), String.valueOf(count));
+    }
+
+    /** Updates the most recently saved policy document in MongoDB and logs the change. */
+    private void updateLastSavedPolicy(java.util.function.Consumer<Map<String, Object>> mutator) {
+        if (this.lastSavedPolicyName == null) {
+            throw new IllegalStateException("No policy has been saved yet — the 'the policy has ...' step must follow a policy save step");
+        }
+        org.springframework.data.mongodb.core.query.Query query = org.springframework.data.mongodb.core.query.Query.query(
+                org.springframework.data.mongodb.core.query.Criteria.where("name").is(this.lastSavedPolicyName));
+        Map<String, Object> policy = mongoTemplate.findOne(query, Map.class, "policies");
+        if (policy == null) {
+            throw new IllegalStateException("Policy '" + this.lastSavedPolicyName + "' not found in MongoDB");
+        }
+        mutator.accept(policy);
+        mongoTemplate.save(policy, "policies");
+        screenCapture.captureSeedData("policies (updated: " + this.lastSavedPolicyName + ")", policy);
+    }
+
+
     @Given("a relationship edge from {string} to {string} of type {string} is saved to MongoDB")
     public void saveRelationshipEdge(String fromId, String toId, String type) {
         Map<String, Object> rel = new LinkedHashMap<>();
@@ -334,7 +943,28 @@ public class PolicyDecisionSteps {
 
     @Given("a runtime context with key {string} value {string}")
     public void addRuntimeContext(String key, String value) {
-        this.runtimeContext.put(key, value);
+        this.runtimeContext.put(key, tryParseJson(value));
+        screenCapture.log("Set runtime context: " + key + "=" + value);
+    }
+
+    /**
+     * Attempts to parse a value as JSON when it looks like an array or object.
+     * This enables runtime context steps to pass complex types like
+     * {@code "[\"crm\", \"website\"]"} or {@code "{\"status\": \"GRANTED\"}"}
+     * which are then deserialized to List/Map instead of remaining strings.
+     */
+    private static Object tryParseJson(String value) {
+        if (value == null) return null;
+        String trimmed = value.trim();
+        if ((trimmed.startsWith("[") && trimmed.endsWith("]"))
+                || (trimmed.startsWith("{") && trimmed.endsWith("}"))) {
+            try {
+                return new com.fasterxml.jackson.databind.ObjectMapper().readValue(trimmed, Object.class);
+            } catch (Exception e) {
+                // Not valid JSON — fall through to string
+            }
+        }
+        return value;
     }
 
     @Given("the last write consistency token is captured")
@@ -362,6 +992,7 @@ public class PolicyDecisionSteps {
         policy.put("state", "ACTIVE");
         policy.put("spelCondition", spelCondition);
         mongoTemplate.save(policy, "policies");
+        this.lastSavedPolicyName = name;
         screenCapture.captureSeedData("policies (" + name + " SpEL)", policy);
         screenCapture.log("Saved policy with SpEL condition: " + spelCondition);
     }
@@ -405,6 +1036,31 @@ public class PolicyDecisionSteps {
         tokenRecord.put("createdAt", Instant.now().toString());
         mongoTemplate.save(tokenRecord, "consistency_tokens");
         screenCapture.log("Set latest consistency token: " + token);
+    }
+
+    @Given("a fresh consistency token is issued for scope {string}")
+    public void issueTokenForScope(String scope) {
+        String token = consistencyTokenStore.issueToken(scope);
+        issuedTokensByScope.put(scope, token);
+        screenCapture.log("Issued consistency token for scope " + scope + ": " + token);
+    }
+
+    @Given("the request uses the issued token for scope {string}")
+    public void useIssuedTokenForScope(String scope) {
+        String token = issuedTokensByScope.get(scope);
+        if (token == null) {
+            throw new IllegalStateException("No issued token for scope " + scope);
+        }
+        addScopeConsistencyToken(scope, token);
+    }
+
+    @Given("a consistency token {string} for scope {string}")
+    public void addScopeConsistencyToken(String token, String scope) {
+        @SuppressWarnings("unchecked")
+        Map<String, Object> tokens = (Map<String, Object>) this.requestBody.computeIfAbsent(
+                "consistencyTokens", k -> new LinkedHashMap<String, Object>());
+        tokens.put(scope, token);
+        screenCapture.log("Set consistency token for scope " + scope + ": " + token);
     }
 
     @Given("the latest consistency token is {string}")
@@ -468,6 +1124,9 @@ public class PolicyDecisionSteps {
     public void stopMongoDB() {
         // Signal to DependencyOutageRule that MongoDB dependency is unhealthy
         this.runtimeContext.put("dependencyHealthy", false);
+        if (this.oacHealthIndicator != null) {
+            this.oacHealthIndicator.setDegraded(true);
+        }
         screenCapture.log("Simulated MongoDB stop: dependency flagged as unhealthy");
     }
 
@@ -475,7 +1134,18 @@ public class PolicyDecisionSteps {
     public void startMongoDB() {
         // Restore MongoDB dependency health
         this.runtimeContext.put("dependencyHealthy", true);
+        if (this.oacHealthIndicator != null) {
+            this.oacHealthIndicator.setDegraded(false);
+        }
         screenCapture.log("Simulated MongoDB start: dependency flagged as healthy");
+    }
+
+    @Given("the decision cache is invalidated")
+    public void invalidateDecisionCache() {
+        if (this.decisionCache != null) {
+            this.decisionCache.evictAll();
+        }
+        screenCapture.log("Simulated decision cache invalidation after policy update");
     }
 
     @Given("a create policy request for effect {string} and name {string}")
@@ -549,6 +1219,9 @@ public class PolicyDecisionSteps {
     public void savePolicySpecToMongoDB() {
         com.oac.decision.model.PolicySpec spec = this.policySpecBuilder.build();
         java.util.Map<String, Object> doc = spec.toDocument();
+        // Decision-evaluation policies must be ACTIVE to be matched by the registry;
+        // the PolicySpec builder defaults to DRAFT for governance submissions.
+        doc.put("state", "ACTIVE");
         mongoTemplate.save(doc, "policies");
         screenCapture.captureSeedData("policies (spec: " + spec.name() + ")", doc);
         screenCapture.log("Saved policy spec to MongoDB: " + spec.name()
@@ -796,6 +1469,29 @@ public class PolicyDecisionSteps {
     }
 
     // ==================== THEN ====================
+
+    @Then("the response should include consistency tokens for scopes {string} and {string}")
+    public void verifyResponseConsistencyTokens(String scope1, String scope2) {
+        Map<String, Object> body = this.response.getBody();
+        assertThat(body).isNotNull();
+        @SuppressWarnings("unchecked")
+        Map<String, Object> tokens = (Map<String, Object>) body.get("consistencyTokens");
+        assertThat(tokens).as("consistency token vector").containsKeys(scope1, scope2);
+        screenCapture.logAssertion("Response consistency tokens include "
+                + scope1 + " and " + scope2, tokens != null && tokens.containsKey(scope1) && tokens.containsKey(scope2),
+                scope1 + ", " + scope2, String.valueOf(tokens));
+    }
+
+    @Then("the response should include consistency tokens for scopes {string}")
+    public void verifyResponseConsistencyToken(String scope1) {
+        Map<String, Object> body = this.response.getBody();
+        assertThat(body).isNotNull();
+        @SuppressWarnings("unchecked")
+        Map<String, Object> tokens = (Map<String, Object>) body.get("consistencyTokens");
+        assertThat(tokens).as("consistency token vector").containsKey(scope1);
+        screenCapture.logAssertion("Response consistency tokens include " + scope1,
+                tokens != null && tokens.containsKey(scope1), scope1, String.valueOf(tokens));
+    }
 
     @Then("the response status should be {int}")
     public void verifyResponseStatus(int expectedStatus) {

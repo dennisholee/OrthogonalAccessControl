@@ -30,6 +30,12 @@ public class OrderServiceSteps {
     @Autowired
     private OrderRepository orderRepository;
 
+    @Autowired
+    private com.oac.decision.application.service.decision.DecisionCache decisionCache;
+
+    @Autowired
+    private com.oac.decision.application.service.decision.CircuitBreaker circuitBreaker;
+
     private final Map<String, String> headers = new LinkedHashMap<>();
     private ResponseEntity<Map<String, Object>> response;
     private ScreenCapture screenCapture;
@@ -49,6 +55,10 @@ public class OrderServiceSteps {
 
         this.headers.clear();
         this.response = null;
+
+        // Reset resilient in-process state between scenarios to avoid cross-contamination.
+        if (this.decisionCache != null) this.decisionCache.reset();
+        if (this.circuitBreaker != null) this.circuitBreaker.reset();
 
         String fullId = scenario.getId();
         String[] parts = fullId.split("\\.");
@@ -177,12 +187,15 @@ public class OrderServiceSteps {
 
     @Given("a ReBAC ALLOW policy is seeded for action {string} resource {string}")
     public void seedRebacPolicy(String action, String resourceType) {
+        // Normalize the action to lowercase so the seeded policy matches the
+        // lowercased request action in the PDP strict query.
+        String storedAction = action.toLowerCase();
         Map<String, Object> policy = new LinkedHashMap<>();
-        policy.put("name", "POL.REBAC." + action + "." + resourceType.toUpperCase() + ".v1");
+        policy.put("name", "POL.REBAC." + storedAction + "." + resourceType.toUpperCase() + ".v1");
         policy.put("effect", "ALLOW");
         policy.put("state", "ACTIVE");
         policy.put("requiredRelationship", "manages");
-        policy.put("action", action);
+        policy.put("action", storedAction);
         policy.put("resourceType", resourceType);
         mongoTemplate.save(policy, "policies");
         screenCapture.captureSeedData("policies (REBAC " + action + " " + resourceType + ")", policy);
@@ -215,7 +228,9 @@ public class OrderServiceSteps {
         policy.put("effect", "ALLOW");
         policy.put("state", "ACTIVE");
         policy.put("subjectId", subjectId);
-        policy.put("action", "read");
+        // Wildcard action so the SpEL policy applies to both read (department) and
+        // approve (SoD) scenarios seeded from this step.
+        policy.put("action", "*");
         policy.put("resourceType", "order");
         policy.put("tenant", "acme-corp");
         policy.put("geography", "global");

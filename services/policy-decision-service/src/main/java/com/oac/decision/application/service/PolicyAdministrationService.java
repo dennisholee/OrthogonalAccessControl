@@ -2,14 +2,19 @@ package com.oac.decision.application.service;
 
 import com.oac.decision.application.port.in.PolicyAdministrationUseCase;
 import com.oac.decision.application.port.out.AuditEvidencePort;
+import com.oac.decision.application.port.out.AttributeSchemaRegistryPort;
 import com.oac.decision.application.port.out.ObservabilityPort;
+import com.oac.decision.application.port.shared.AttributeReferenceExtractor;
 import com.oac.decision.model.AuditEventRecord;
 import com.oac.decision.model.CreatePolicyRequest;
 import com.oac.decision.model.DisasterRecoveryStatusResponse;
 import com.oac.decision.model.GovernanceConflictException;
+import com.oac.decision.model.PolicyAuthorizationException;
+import com.oac.decision.model.PolicyCondition;
 import com.oac.decision.model.PolicyRiskLevel;
 import com.oac.decision.model.PolicyResponse;
 import com.oac.decision.model.PolicyState;
+import com.oac.decision.model.PolicyValidationException;
 import com.oac.decision.model.PromotePolicyRequest;
 
 import java.time.OffsetDateTime;
@@ -23,29 +28,39 @@ import java.util.stream.Collectors;
 public class PolicyAdministrationService implements PolicyAdministrationUseCase {
 
     // Allow direct DRAFT→ACTIVE promotion for streamlined lifecycle management.
-    // Also supports the full VALIDATED→APPROVED→STAGED→ACTIVE chain for
-    // environments requiring staged rollouts.
+    // Also supports the full VALIDATED→APPROVED→(STAGED|ACTIVE) chain for
+    // environments requiring staged rollouts, plus ACTIVE→ARCHIVED→ACTIVE
+    // archival/restore for audit hold scenarios.
     private static final Map<PolicyState, EnumSet<PolicyState>> ALLOWED_TRANSITIONS = Map.of(
             PolicyState.DRAFT, EnumSet.of(PolicyState.VALIDATED, PolicyState.ACTIVE),
             PolicyState.VALIDATED, EnumSet.of(PolicyState.APPROVED),
-            PolicyState.APPROVED, EnumSet.of(PolicyState.STAGED),
+            PolicyState.APPROVED, EnumSet.of(PolicyState.STAGED, PolicyState.ACTIVE),
             PolicyState.STAGED, EnumSet.of(PolicyState.ACTIVE),
-            PolicyState.ACTIVE, EnumSet.of(PolicyState.DEPRECATED),
+            PolicyState.ACTIVE, EnumSet.of(PolicyState.DEPRECATED, PolicyState.ARCHIVED),
+            PolicyState.ARCHIVED, EnumSet.of(PolicyState.ACTIVE),
             PolicyState.DEPRECATED, EnumSet.of(PolicyState.RETIRED),
             PolicyState.RETIRED, EnumSet.noneOf(PolicyState.class)
     );
 
     private final AuditEvidencePort auditEvidencePort;
     private final ObservabilityPort observabilityPort;
+    private final AttributeSchemaRegistryPort attributeSchemaRegistry;
     private final Map<String, StoredPolicy> policies = new HashMap<>();
 
-    public PolicyAdministrationService(AuditEvidencePort auditEvidencePort, ObservabilityPort observabilityPort) {
+    public PolicyAdministrationService(
+            AuditEvidencePort auditEvidencePort,
+            ObservabilityPort observabilityPort,
+            AttributeSchemaRegistryPort attributeSchemaRegistry
+    ) {
         this.auditEvidencePort = auditEvidencePort;
         this.observabilityPort = observabilityPort;
+        this.attributeSchemaRegistry = attributeSchemaRegistry;
     }
 
     @Override
     public synchronized PolicyResponse createPolicyDraft(CreatePolicyRequest request) {
+        validatePolicySpec(request);
+
         String policyId = "POL-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
         StoredPolicy storedPolicy = new StoredPolicy(
                 policyId,
@@ -106,6 +121,26 @@ public class PolicyAdministrationService implements PolicyAdministrationUseCase 
                     "POLICY_SEPARATION_OF_DUTIES_VIOLATION",
                     "Policy author cannot approve their own policy promotion"
             );
+        }
+
+        // Maker-checker / separation of duties enforced from the promoting principal
+        // (when supplied). The author may never promote their own policy, and a
+        // principal that is neither the owner nor an approver is forbidden.
+        String principal = request.principal();
+        if (principal != null && !principal.isBlank()) {
+            if (principal.equals(stored.author)) {
+                observabilityPort.recordSecurityAlert("SEPARATION_OF_DUTIES_VIOLATION");
+                throw new GovernanceConflictException(
+                        "GOVERNANCE_CONFLICT",
+                        "Policy author cannot approve their own policy promotion"
+                );
+            }
+            if (!principal.equals(stored.owner) && !request.approvers().contains(principal)) {
+                throw new PolicyAuthorizationException(
+                        "GOVERNANCE_SOD_VIOLATION",
+                        "Principal '" + principal + "' is not authorized to promote this policy"
+                );
+            }
         }
 
         PolicyState fromState = stored.state;
@@ -220,6 +255,46 @@ public class PolicyAdministrationService implements PolicyAdministrationUseCase 
                 decisionCode,
                 OffsetDateTime.now()
         );
+    }
+
+    /**
+     * Structural validation of a policy spec at creation time.
+     * Rejects invalid condition/subject combinations (e.g. a workload policy
+     * carrying a ReBAC relationship condition).
+     */
+    private void validatePolicySpec(CreatePolicyRequest request) {
+        if ("workload".equals(request.subjectType()) && request.conditions() != null) {
+            boolean hasRebacCondition = request.conditions().stream()
+                    .anyMatch(condition -> condition != null && "rebac".equals(condition.type()));
+            if (hasRebacCondition) {
+                throw new PolicyValidationException(
+                        "Workload policies cannot contain ReBAC conditions"
+                );
+            }
+        }
+
+        // Attribute Schema Registry (Section 4.7): every attribute referenced by a SpEL
+        // condition MUST be registered. Unknown references are rejected at submission
+        // time — a typo must not silently evaluate to null and over-grant.
+        if (request.conditions() != null) {
+            for (PolicyCondition condition : request.conditions()) {
+                if (condition == null || !PolicyCondition.TYPE_SPEL.equals(condition.type())) {
+                    continue;
+                }
+                Object exprObj = condition.params() == null
+                        ? null : condition.params().get(PolicyCondition.PARAM_EXPRESSION);
+                if (exprObj == null) {
+                    continue;
+                }
+                for (String ref : AttributeReferenceExtractor.extract(exprObj.toString())) {
+                    if (!attributeSchemaRegistry.isRegistered(ref)) {
+                        throw new PolicyValidationException(
+                                "Unknown attribute reference '" + ref + "' in SpEL condition"
+                        );
+                    }
+                }
+            }
+        }
     }
 
     private void validateLifecycleGates(StoredPolicy stored, PromotePolicyRequest request) {

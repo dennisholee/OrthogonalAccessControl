@@ -1,8 +1,8 @@
 package com.oac.decision.adapter.in.web;
 
-import com.oac.decision.model.GovernanceConflictException;
 import com.oac.decision.model.ErrorItem;
 import com.oac.decision.model.ErrorResponse;
+import com.oac.decision.model.PolicyDomainException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -24,9 +24,13 @@ public class ApiExceptionHandler {
                 .body(new ErrorResponse("VALIDATION_ERROR", errors));
     }
 
-    @ExceptionHandler(GovernanceConflictException.class)
-    public ResponseEntity<ErrorResponse> handleGovernanceConflict(GovernanceConflictException exception) {
-        return ResponseEntity.status(HttpStatus.CONFLICT)
+    @ExceptionHandler(PolicyDomainException.class)
+    public ResponseEntity<ErrorResponse> handlePolicyDomain(PolicyDomainException exception) {
+        HttpStatus status = HttpStatus.resolve(exception.httpStatus());
+        if (status == null) {
+            status = HttpStatus.INTERNAL_SERVER_ERROR;
+        }
+        return ResponseEntity.status(status)
                 .body(new ErrorResponse(
                         exception.decisionCode(),
                         List.of(new ErrorItem(exception.decisionCode(), exception.getMessage(), false))

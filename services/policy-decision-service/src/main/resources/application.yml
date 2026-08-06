@@ -3,3 +3,9 @@ spring:
     exclude:
       - org.springframework.boot.autoconfigure.mongo.MongoAutoConfiguration
       - org.springframework.boot.autoconfigure.data.mongo.MongoDataAutoConfiguration
+
+management:
+  endpoint:
+    health:
+      show-components: always
+      show-details: always

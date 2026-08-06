@@ -6,6 +6,7 @@ import com.oac.decision.model.CheckPermissionResponse;
 import com.oac.decision.model.LookupResourcesRequest;
 import com.oac.decision.model.LookupResourcesResponse;
 import jakarta.validation.Valid;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -26,7 +27,20 @@ public class DecisionController {
 
     @PostMapping("/check-permission")
     public ResponseEntity<CheckPermissionResponse> checkPermission(@Valid @RequestBody CheckPermissionRequest request) {
-        return ResponseEntity.ok(decisionQueryUseCase.checkPermission(request));
+        CheckPermissionResponse response = decisionQueryUseCase.checkPermission(request);
+
+        HttpHeaders headers = new HttpHeaders();
+        if (response.circuitBreakerState() != null) {
+            headers.add("X-OAC-Circuit-Breaker", response.circuitBreakerState());
+        }
+        if (response.cacheStatus() != null) {
+            headers.add("X-OAC-Cache", response.cacheStatus());
+        }
+        if (response.decisionCode() != null && response.decisionCode().startsWith("DECISION_FAIL_OPEN")) {
+            headers.add("X-OAC-Fallback", "true");
+        }
+
+        return ResponseEntity.ok().headers(headers).body(response);
     }
 
     @PostMapping("/lookup-resources")

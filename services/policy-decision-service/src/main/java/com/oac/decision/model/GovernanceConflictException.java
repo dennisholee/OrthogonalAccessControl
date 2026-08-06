@@ -1,15 +1,12 @@
 package com.oac.decision.model;
 
-public class GovernanceConflictException extends RuntimeException {
-
-    private final String decisionCode;
+/**
+ * Raised for policy lifecycle conflicts (maker-checker, invalid state transitions,
+ * quorum failures). Maps to HTTP 409.
+ */
+public class GovernanceConflictException extends PolicyDomainException {
 
     public GovernanceConflictException(String decisionCode, String message) {
-        super(message);
-        this.decisionCode = decisionCode;
-    }
-
-    public String decisionCode() {
-        return decisionCode;
+        super(decisionCode, message, 409);
     }
 }

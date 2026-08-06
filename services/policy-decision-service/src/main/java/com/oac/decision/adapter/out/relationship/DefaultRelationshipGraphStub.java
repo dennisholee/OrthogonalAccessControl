@@ -7,6 +7,7 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -45,6 +46,12 @@ public class DefaultRelationshipGraphStub implements RelationshipGraphPort {
 
     @Override
     public boolean hasRelationship(String subjectId, String resourceId, String relationshipType, int maxDepth) {
+        return false;
+    }
+
+    @Override
+    public boolean hasRelationship(String subjectId, String resourceId, String relationshipType, int maxDepth,
+                                   Map<String, String> boundaryScope) {
         return false;
     }
 
